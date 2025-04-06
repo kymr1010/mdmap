@@ -1,0 +1,17 @@
+# Dockerfile.backend.dev
+
+FROM rust:latest
+
+WORKDIR /app
+
+# cargo-watch をインストール
+RUN cargo install cargo-watch
+
+# ソースをコピー（最初だけ）
+COPY . .
+
+# 必要なポートを公開
+EXPOSE 8080
+
+# ファイルを監視して自動ビルド＆実行
+CMD ["cargo", "watch", "-x", "run"]

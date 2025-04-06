@@ -1,0 +1,23 @@
+FROM rust:latest AS builder
+
+WORKDIR /app
+
+# 依存関係をキャッシュする
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -f target/release/deps/memoapp_backend*
+
+# 実際のソースをコピーしてビルド
+COPY src ./src
+RUN cargo build --release
+
+# 本番用軽量イメージ
+FROM debian:bullseye-slim
+
+WORKDIR /app
+COPY --from=builder /app/target/release/memoapp-backend ./
+
+EXPOSE 8080
+
+CMD ["./memoapp-backend"]

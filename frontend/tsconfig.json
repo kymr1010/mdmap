@@ -1,0 +1,16 @@
+{
+  // "extends": "@tsconfig/node20/tsconfig.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "target": "es2022",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "NodeNext",
+    "jsxFactory": "h",
+    // "jsxFragmentFactory": "Fragment",
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "lib": ["dom"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@memo-app/frontend",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@memo-app/canvas-wasm": "workspace:*",
+    "solid-js": "^1.9.5"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "vite-plugin-solid": "^2.9.0"
+  },
+  "engines": {
+    "node": "20.17.0"
+  },
+  "type": "module"
+}

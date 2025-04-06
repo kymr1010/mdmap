@@ -1,0 +1,15 @@
+{
+  "name": "memo-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "frontend:dev": "pnpm -F @your-app/frontend dev",
+    "frontend:build": "pnpm -F @your-app/frontend build",
+    "wasm:build": "cd canvas-wasm && wasm-pack build --target web --scope memo-app"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.7.0"
+}

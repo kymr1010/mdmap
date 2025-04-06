@@ -1,0 +1,41 @@
+FROM node:lts-alpine AS base
+
+WORKDIR /app
+
+# Rust環境セットアップ
+RUN apk update && apk add curl build-base
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+# pnpmインストール
+RUN npm install -g pnpm
+
+# package.jsonとworkspace設定をコピー
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+
+# 依存関係をfetchしてキャッシュ
+RUN pnpm fetch
+
+# canvas-wasmビルドとコピー
+COPY canvas-wasm /tmp/canvas-wasm
+RUN cd /tmp/canvas-wasm && wasm-pack build --target web --scope memo-app
+RUN mkdir -p /app/packages/canvas-wasm
+RUN cp -r /tmp/canvas-wasm/pkg/* /app/packages/canvas-wasm/
+
+# frontendをコピー
+COPY frontend ./frontend
+
+# 作業ディレクトリを frontend に変更して install
+RUN pnpm install --offline --shamefully-hoist
+
+WORKDIR /app/frontend
+# ビルド
+RUN pnpm run build
+
+RUN ls /app/node_modules -lan
+
+# 起動コマンド
+CMD ["pnpm", "run", "dev", "--host"]
+

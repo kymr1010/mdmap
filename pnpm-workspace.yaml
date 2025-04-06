@@ -1,0 +1,5 @@
+packages:
+  - "frontend"
+  - "canvas-wasm/pkg"
+ignoredBuiltDependencies:
+  - esbuild
