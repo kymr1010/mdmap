@@ -41,7 +41,7 @@ impl WindowState {
     let clear_color = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
 
     // wgpu のインスタンスを作成
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..wgpu::InstanceDescriptor::default()
     });
@@ -65,15 +65,18 @@ impl WindowState {
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::empty(),
-                required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::downlevel_webgl2_defaults()
-                } else {
-                    wgpu::Limits::default()
-                },
-                label: None,
-            },
-            None,
+              label: None,
+              required_features: wgpu::Features::empty(),
+              // Chrome 135b deprecates downlevel_webgl2_defaults
+              // required_limits: if cfg!(target_arch = "wasm32") {
+              //     wgpu::Limits::downlevel_webgl2_defaults()
+              // } else {
+              //     wgpu::Limits::default()
+              // },
+              required_limits: wgpu::Limits::downlevel_defaults(), // wgpu::Limits::default(),
+              memory_hints: wgpu::MemoryHints::MemoryUsage,
+              trace: wgpu::Trace::Off,
+            }
         )
         .await
         .expect("Failed to create device");
@@ -116,15 +119,16 @@ impl WindowState {
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
       label: Some("Render Pipeline"),
       layout: Some(&render_pipeline_layout),
+      cache: None,
       vertex: wgpu::VertexState {
         module: &shader,
-        entry_point: "vs_main", // 1.
+        entry_point: Some("vs_main"), // 1.
         buffers: &[],
         compilation_options: wgpu::PipelineCompilationOptions::default(), // 2.
       },
       fragment: Some(wgpu::FragmentState { // 3.
         module: &shader,
-        entry_point: "fs_main",
+        entry_point: Some("fs_main"),
         targets: &[Some(wgpu::ColorTargetState { // 4.
             format: config.format,
             blend: Some(wgpu::BlendState::REPLACE),
