@@ -3,7 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 use web_sys::Event;
 use wgpu;
 
-use crate::mouse_state::{self, MouseState};
+use crate::mouse_state::MouseState;
+use crate::object_state::{self, ObjectState};
 
 pub struct Size {
   width: u32,
@@ -33,8 +34,8 @@ impl WindowState {
         .expect("No canvas with id my_canvas"))
         .expect("Element is not a canvas");
 
-    let width = canvas.width();
-    let height = canvas.height();
+    let width = window.inner_width().expect("No inner width").as_f64().expect("inner width is not a number") as u32;
+    let height = window.inner_height().expect("No inner height").as_f64().expect("inner width is not a number") as u32;
     let size = Size { width, height };
 
     // 初期の背景色（クリアカラー）
@@ -84,38 +85,41 @@ impl WindowState {
     // surface の能力を取得し、フォーマットなどを決定
     let surface_caps = surface.get_capabilities(&adapter);
     let surface_format = surface_caps
-        .formats
-        .iter()
-        .copied()
-        .filter(|f| f.is_srgb())
-        .next()
-        .unwrap_or(surface_caps.formats[0]);
+      .formats
+      .iter()
+      .copied()
+      .filter(|f| f.is_srgb())
+      .next()
+      .unwrap_or(surface_caps.formats[0]);
 
     // サーフェスの設定
     let config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format: surface_format,
-        width: size.width,
-        height: size.height,
-        present_mode: surface_caps.present_modes[0],
-        alpha_mode: surface_caps.alpha_modes[0],
-        view_formats: vec![],
-        desired_maximum_frame_latency: 0,
+      usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+      format: surface_format,
+      width: size.width,
+      height: size.height,
+      present_mode: surface_caps.present_modes[0],
+      alpha_mode: surface_caps.alpha_modes[0],
+      view_formats: vec![],
+      desired_maximum_frame_latency: 0,
     };
     surface.configure(&device, &config);
 
+    // シェーダーを作成
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
       label: Some("Shader"),
       source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
     });
 
+    // パイプラインを作成
     let render_pipeline_layout =
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Render Pipeline Layout"),
-        bind_group_layouts: &[],
-        push_constant_ranges: &[],
+      label: Some("Render Pipeline Layout"),
+      bind_group_layouts: &[],
+      push_constant_ranges: &[],
     });
 
+    // レンダーパイプラインを作成
     let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
       label: Some("Render Pipeline"),
       layout: Some(&render_pipeline_layout),
@@ -178,6 +182,10 @@ impl WindowState {
     &self.window
   }
 
+  pub fn device(&self) -> &wgpu::Device {
+    &self.device
+  }
+
   pub fn canvas(&self) -> &web_sys::HtmlCanvasElement {
     &self.canvas
   }
@@ -199,7 +207,7 @@ impl WindowState {
     self.clear_color = wgpu::Color {
       r: mouse_state.x / self.size.width as f64,
       g: mouse_state.y / self.size.height as f64,
-      b: 0.0,
+      b: if mouse_state.is_clicked { 1.0 } else { 0.0 },
       a: 1.0,
     };
     true
@@ -209,7 +217,7 @@ impl WindowState {
     // 何もしない
   }
 
-  pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+  pub fn render(&mut self, object_state: Rc<RefCell<ObjectState>>) -> Result<(), wgpu::SurfaceError> {
     let output = self.surface.get_current_texture()?;
     let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -238,7 +246,8 @@ impl WindowState {
         timestamp_writes: None,
       });
       render_pass.set_pipeline(&self.render_pipeline); // 2.
-      render_pass.draw(0..3, 0..1); // 3.
+      render_pass.set_vertex_buffer(0, object_state.borrow().vertex_buffer().slice(..));
+      render_pass.draw(0..3, 0..1);
     }
 
 

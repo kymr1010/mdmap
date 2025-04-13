@@ -10,10 +10,17 @@ function App() {
   });
 
   return (
-    <>
-      <p class="read-the-docs">hello</p>
-      <canvas id="my_canvas" width="640" height="480"></canvas>
-    </>
+    <div
+      style={{
+        width: "100vw",
+        height: "100vh",
+        display: "flex",
+        "justify-content": "center",
+        "align-items": "center",
+      }}
+    >
+      <canvas id="my_canvas"></canvas>
+    </div>
   );
 }
 

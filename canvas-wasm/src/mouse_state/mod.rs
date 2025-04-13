@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use web_sys::{MouseEvent, HtmlCanvasElement};
+use web_sys::MouseEvent;
 
 /// マウスの状態を管理する構造体
 pub struct MouseState {
@@ -29,9 +29,8 @@ impl MouseState {
         self.is_clicked = clicked;
     }
 
-    /// イベントリスナーを登録する例
-    /// ここでは canvas に対してマウス移動イベントを登録する
-    pub fn register_listeners(self_rc: &std::rc::Rc<std::cell::RefCell<Self>>, canvas: &HtmlCanvasElement) -> Result<(), JsValue> {
+    /// イベントリスナーを登録
+    pub fn register_listeners(self_rc: &std::rc::Rc<std::cell::RefCell<Self>>, canvas: &web_sys::HtmlElement) -> Result<(), JsValue> {
         // マウスムーブイベント
         {
             let mouse_state_rc = self_rc.clone();
@@ -40,7 +39,7 @@ impl MouseState {
             }) as Box<dyn FnMut(MouseEvent)>);
 
             canvas.add_event_listener_with_callback("mousemove", closure.as_ref().unchecked_ref())?;
-            closure.forget(); // 必要に応じて State 内で保持するなど対策を検討
+            closure.forget();
         }
 
         // マウスダウンイベント（クリック開始）
@@ -62,6 +61,19 @@ impl MouseState {
             }) as Box<dyn FnMut(MouseEvent)>);
 
             canvas.add_event_listener_with_callback("mouseup", closure.as_ref().unchecked_ref())?;
+            closure.forget();
+        }
+
+        // マウスエンターイベント （クリック判定）
+        {
+            let mouse_state_rc = self_rc.clone();
+            let closure = Closure::wrap(Box::new(move |event: MouseEvent| {
+                if event.buttons() == 0 {
+                    mouse_state_rc.borrow_mut().set_click(false);
+                }
+            }) as Box<dyn FnMut(MouseEvent)>);
+        
+            canvas.add_event_listener_with_callback("mouseenter", closure.as_ref().unchecked_ref())?;
             closure.forget();
         }
 

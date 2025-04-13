@@ -7,6 +7,8 @@ mod window_state;
 use window_state::WindowState;
 mod mouse_state;
 use mouse_state::MouseState;
+mod object_state;
+use object_state::ObjectState;
 use wasm_bindgen::JsCast;
 
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
@@ -22,6 +24,13 @@ pub async fn run() -> Result<(), wasm_bindgen::JsValue> {
 
   let window_state_rc = WindowState::new(window.clone()).await?;
   let mouse_state_rc = Rc::new(RefCell::new(MouseState::new()));
+  let object_state_rc = Rc::new(RefCell::new(ObjectState::new(window_state_rc.borrow().device(), &[
+    object_state::Vertex::new([0.0, 0.5, 0.0], [1.0, 0.0, 0.0]),
+    object_state::Vertex::new([0.0, -0.5, 0.0], [0.0, 1.0, 0.0]),
+    object_state::Vertex::new([0.5, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    object_state::Vertex::new([-0.5, 0.0, 0.0], [1.0, 1.0, 1.0]),
+    object_state::Vertex::new([-0.5, 0.0, 0.0], [1.0, 1.0, 1.0]),
+  ])));
 
   mouse_state::MouseState::register_listeners(&mouse_state_rc, window_state_rc.borrow().canvas())?;
 
@@ -35,11 +44,10 @@ pub async fn run() -> Result<(), wasm_bindgen::JsValue> {
       let window_state_rc_clone = window_state_rc.clone();
       let mouse_state_rc_clone = mouse_state_rc.clone();
 
-
       window_state_rc_clone.borrow_mut().input(&mut mouse_state_rc_clone.borrow_mut());
       window_state_rc_clone.borrow_mut().update();
       // 描画処理。エラーはコンソールに出力
-      if let Err(e) = window_state_rc_clone.borrow_mut().render() {
+      if let Err(e) = window_state_rc_clone.borrow_mut().render(object_state_rc.clone()) {
           web_sys::console::error_1(&"error".into());
       }
       // 次のフレームのスケジューリング
