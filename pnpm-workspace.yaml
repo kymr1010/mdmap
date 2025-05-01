@@ -1,5 +1,6 @@
 packages:
   - "frontend"
-  - "canvas-wasm/pkg"
+  - "wasm/pkg"
 ignoredBuiltDependencies:
   - esbuild
+nodeLinker: hoisted

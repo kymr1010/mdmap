@@ -6,7 +6,7 @@
   "scripts": {
     "frontend:dev": "pnpm -F @your-app/frontend dev",
     "frontend:build": "pnpm -F @your-app/frontend build",
-    "wasm:build": "cd canvas-wasm && wasm-pack build --target web --scope memo-app"
+    "wasm:build": "cd wasm && wasm-pack build --target web --scope memo-app"
   },
   "keywords": [],
   "author": "",

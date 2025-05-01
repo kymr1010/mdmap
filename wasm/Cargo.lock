@@ -104,20 +104,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "canvas-wasm"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "cfg-if",
- "console_error_panic_hook",
- "env_logger",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -860,6 +846,20 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "wasm"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "console_error_panic_hook",
+ "env_logger",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
 
 [[package]]
 name = "wasm-bindgen"

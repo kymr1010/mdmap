@@ -1,12 +1,13 @@
 import { createSignal, onMount } from "solid-js";
-import init from "@memo-app/canvas-wasm";
+// import init from "@memo-app/wasm";
+import { CardContainer } from "./CardContainer/CardContainer.jsx";
 
 function App() {
   onMount(async () => {
     const res = await fetch("http://localhost:8082/");
     const text = await res.text();
     console.log(text); // "Hello, World! 🎉"
-    init();
+    // init();
   });
 
   return (
@@ -15,11 +16,11 @@ function App() {
         width: "100vw",
         height: "100vh",
         display: "flex",
-        "justify-content": "center",
-        "align-items": "center",
+        overflow: "hidden",
+        position: "relative",
       }}
     >
-      <canvas id="my_canvas"></canvas>
+      <CardContainer position={{ x: 0, y: 0 }}></CardContainer>
     </div>
   );
 }

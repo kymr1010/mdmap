@@ -18,11 +18,11 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # 依存関係をfetchしてキャッシュ
 RUN pnpm fetch
 
-# canvas-wasmビルドとコピー
-COPY canvas-wasm /tmp/canvas-wasm
-RUN cd /tmp/canvas-wasm && wasm-pack build --target web --scope memo-app
-RUN mkdir -p /app/packages/canvas-wasm
-RUN cp -r /tmp/canvas-wasm/pkg/* /app/packages/canvas-wasm/
+# wasmビルドとコピー
+COPY wasm /tmp/wasm
+RUN cd /tmp/wasm && wasm-pack build --target web --scope memo-app
+RUN mkdir -p /app/packages/wasm
+RUN cp -r /tmp/wasm/pkg/* /app/packages/wasm/
 
 # frontendをコピー
 COPY frontend ./frontend

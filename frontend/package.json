@@ -6,7 +6,10 @@
     "build": "vite build"
   },
   "dependencies": {
-    "@memo-app/canvas-wasm": "workspace:*",
+    "@macaron-css/core": "^1.5.2",
+    "@macaron-css/solid": "^1.5.3",
+    "@macaron-css/vite": "^1.5.1",
+    "@memo-app/wasm": "workspace:*",
     "solid-js": "^1.9.5"
   },
   "devDependencies": {

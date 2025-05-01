@@ -1,7 +1,7 @@
 node_modules
 frontend/packages
 backend/target
-canvas-wasm/target
+wasm/target
 pkg
 .pnpm-store
 .env
