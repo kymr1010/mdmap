@@ -20,6 +20,7 @@ function App() {
         position: "relative",
       }}
     >
+      <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
       <CardContainer position={{ x: 0, y: 0 }}></CardContainer>
     </div>
   );

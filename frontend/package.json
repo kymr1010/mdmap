@@ -10,6 +10,8 @@
     "@macaron-css/solid": "^1.5.3",
     "@macaron-css/vite": "^1.5.1",
     "@memo-app/wasm": "workspace:*",
+    "dompurify": "^3.2.5",
+    "marked": "^15.0.11",
     "solid-js": "^1.9.5"
   },
   "devDependencies": {

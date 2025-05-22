@@ -1,10 +1,12 @@
 import { styled } from "@macaron-css/solid";
 import { createEffect, createSignal, For, on, onMount } from "solid-js";
 import { Card } from "../Card/Card.jsx";
-import { Card as CardProps } from "../Card/Card.d.js";
+import { Card as CardProps } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
+import { useContextMenu } from "../hooks/useContextMenu.jsx";
+import { createCard, getCards } from "../hooks/useAPI.js";
 
 export const CardContainer = (props: { position: Dimmension }) => {
   let ref!: HTMLDivElement;
@@ -21,18 +23,25 @@ export const CardContainer = (props: { position: Dimmension }) => {
   const [tiles, setTiles] = createSignal<Record<string, CardProps[]>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
 
+  const { onContextMenu, ContextMenu } = useContextMenu([
+    { label: "作成", action: () => addCard() },
+    { label: "作成", action: () => console.log("作成しました") },
+  ]);
+
   const [scale, setScale] = createSignal<number>(1);
   const [zoomLevel, setZoomLevel] = createSignal<number>(0);
   let beforeDelta = 0;
   const ZOOM = {
     MAX: 5,
-    MIN: -10,
+    MIN: -5,
     FACTOR: 1.25,
   };
 
   const currentTile = () => ({
-    x: Math.floor((position().x / scale() + window.innerWidth / 2) / tileSize),
-    y: Math.floor((position().y / scale() + window.innerHeight / 2) / tileSize),
+    x: Math.floor((-position().x + window.innerWidth / 2) / scale() / tileSize),
+    y: Math.floor(
+      (-position().y + window.innerHeight / 2) / scale() / tileSize
+    ),
   });
 
   // position が変わったら currentTile を更新
@@ -68,20 +77,11 @@ export const CardContainer = (props: { position: Dimmension }) => {
           )
             .then((r) => r.json() as Promise<CardProps[]>)
             .then((data) => {
-              console.log(data);
+              // console.log(data);
               setTiles((prev) => ({ ...prev, [key]: data }));
             });
         }
       });
-
-      // // 隣接しないタイルは削除
-      // setTiles((prev) => {
-      //   const next: typeof prev = {};
-      //   for (const k of Object.keys(prev)) {
-      //     if (needed.has(k)) next[k] = prev[k];
-      //   }
-      //   return next;
-      // });
     })
   );
 
@@ -93,19 +93,18 @@ export const CardContainer = (props: { position: Dimmension }) => {
         const factor = Math.pow(ZOOM.FACTOR, current - prev);
         console.log(factor);
         const positionFix = {
-          x: mousePosition().x * (1 - factor),
+          x: mousePosition().x * (1 - factor), // 拡縮に伴うマウスの移動ベクトル（移動前-移動後）
           y: mousePosition().y * (1 - factor),
         };
-
         setPosition((prev) => {
           return {
-            x: Math.floor(prev.x + positionFix.x),
+            x: Math.floor(prev.x + positionFix.x), // 移動ベクトルを加算することでマウス座標を中心に拡縮
             y: Math.floor(prev.y + positionFix.y),
           };
         });
         setMousePosition((prev) => {
           return {
-            x: Math.floor(prev.x * factor),
+            x: Math.floor(prev.x * factor), // 移動後ベクトル
             y: Math.floor(prev.y * factor),
           };
         });
@@ -118,7 +117,23 @@ export const CardContainer = (props: { position: Dimmension }) => {
     useDrag(ref, position, setPosition, () => 1); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
-  const handleScroll = (event) => {
+  const addCard = () => {
+    createCard({
+      id: 0,
+      position: {
+        x: mousePosition().x,
+        y: mousePosition().y,
+      },
+      size: {
+        x: 100,
+        y: 100,
+      },
+      title: "",
+      contents: "",
+    });
+  };
+
+  const handleScroll = (event: WheelEvent) => {
     event.preventDefault();
 
     const delta = event.deltaY > 0 ? 1 : -1;
@@ -144,34 +159,37 @@ export const CardContainer = (props: { position: Dimmension }) => {
   };
 
   return (
-    <StyledCardContainer
-      ref={ref}
-      on:wheel={handleScroll}
-      on:mousemove={(e) => {
-        setMousePosition({
-          x: e.clientX - position().x,
-          y: e.clientY - position().y,
-        });
-      }}
-      style={{
-        position: "absolute",
-        "background-size": `${20 * scale()}px ${20 * scale()}px`,
-        "background-position": `${position().x}px ${position().y}px`,
-      }}
-      data-card-container
-    >
-      <div
+    <>
+      <StyledCardContainer
+        ref={ref}
+        on:wheel={handleScroll}
+        on:mousemove={(e) => {
+          setMousePosition({
+            x: e.clientX - position().x,
+            y: e.clientY - position().y,
+          });
+        }}
         style={{
           position: "absolute",
-          transform: `translate3d(${position().x}px, ${
-            position().y
-          }px, 0) scale(${scale()})`,
+          "background-size": `${20 * scale()}px ${20 * scale()}px`,
+          "background-position": `${position().x}px ${position().y}px`,
         }}
+        oncontextmenu={onContextMenu}
+        data-card-container
       >
-        <For each={visibleCards()}>
-          {(card) => <Card card={card} scaleFactor={scale} />}
-        </For>
-      </div>
+        <div
+          style={{
+            position: "absolute",
+            transform: `translate3d(${position().x}px, ${
+              position().y
+            }px, 0) scale(${scale()})`,
+          }}
+        >
+          <For each={visibleCards()}>
+            {(card) => <Card card={card} scaleFactor={scale} />}
+          </For>
+        </div>
+      </StyledCardContainer>
       <div class={style({ position: "absolute", left: 0, top: 0 })}>
         <p>{nowTile()}</p>
         <p>
@@ -185,7 +203,8 @@ export const CardContainer = (props: { position: Dimmension }) => {
           ZOOM: {zoomLevel()} SCALE: {scale()}
         </label>
       </div>
-    </StyledCardContainer>
+      <ContextMenu />
+    </>
   );
 };
 

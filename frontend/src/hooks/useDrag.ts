@@ -17,8 +17,10 @@ export function useDrag(
 
   const onPointerDown = (e: PointerEvent) => {
     // 重なっている要素への伝播を止める
-    e.stopPropagation();
-    e.preventDefault();
+    if (e.button !== 0) return;
+    if (e.target !== ref) return;
+    // e.stopPropagation();
+    // e.preventDefault();
 
     // この要素にポインタをキャプチャ（ムーブ／アップもこの要素で受ける）
     ref.setPointerCapture(e.pointerId);

@@ -1,6 +1,7 @@
-import { Dimmension } from "../schema/Point.js";
+import { Dimmension } from "./Point.js";
 
 export interface Card {
+  id: number;
   position: Dimmension;
   size: Dimmension;
   title: string;
