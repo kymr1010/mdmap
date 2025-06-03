@@ -24,6 +24,7 @@ export const createCard = async (card: Card) => {
 };
 
 export const updateCard = async (card: Card) => {
+  console.log("Updating card: %o", JSON.stringify(card));
   await fetchAPI("card", {
     method: "PATCH",
     headers: {

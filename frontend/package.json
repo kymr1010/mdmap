@@ -10,16 +10,19 @@
     "@macaron-css/solid": "^1.5.3",
     "@macaron-css/vite": "^1.5.1",
     "@memo-app/wasm": "workspace:*",
+    "@yaireo/tagify": "^4.35.1",
     "dompurify": "^3.2.5",
+    "easymde": "^2.20.0",
     "marked": "^15.0.11",
     "solid-js": "^1.9.5"
   },
   "devDependencies": {
+    "solid-devtools": "^0.34.0",
     "vite": "^5.0.0",
     "vite-plugin-solid": "^2.9.0"
   },
   "engines": {
-    "node": "20.17.0"
+    "node": "22.14.0"
   },
   "type": "module"
 }

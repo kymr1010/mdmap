@@ -1,0 +1,158 @@
+diff --git a/backend/src/handlers/cards.rs b/backend/src/handlers/cards.rs
+index c1de352..62c4112 100644
+--- a/backend/src/handlers/cards.rs
++++ b/backend/src/handlers/cards.rs
+@@ -175,12 +175,15 @@ pub async fn update_card(
+             StatusCode::ACCEPTED,
+             Json(json!({"code": StatusCode::ACCEPTED.to_string(), "message":"Success"})),
+         ),
+-        Err(e) => (
+-            StatusCode::INTERNAL_SERVER_ERROR,
+-            Json(
+-                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
++        Err(e) => {
++            println!("Error updating card: {}", e);
++            (
++                StatusCode::INTERNAL_SERVER_ERROR,
++                Json(
++                    json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
++                ),
+             ),
+-        ),
++        }
+     }
+ }
+ 
+diff --git a/backend/src/main.rs b/backend/src/main.rs
+index 2181813..0a19563 100644
+--- a/backend/src/main.rs
++++ b/backend/src/main.rs
+@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+ 
+     // ルーター組み立て
+     let app = routes::router()
+-        .layer(ServiceBuilder::new().layer(cors))
++        .layer(cors)
+         .layer(Extension(pool));
+ 
+     // サーバ起動
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 473c904..b694141 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -8,8 +8,8 @@ services:
+     ports:
+       - "5173:5173"
+     volumes:
+-      - .:/app
+-
++      - ./frontend:/app
++      - /app/node_modules
+   backend:
+     build:
+       context: ./backend
+@@ -22,6 +22,8 @@ services:
+     environment:
+       DB_HOST: mariadb
+       DB_PORT: 3308
++    command: >
++      sh -c "cargo sqlx migrate run && cargo run"
+     volumes:
+       - ./backend:/app
+       - cargo-target:/app/target
+diff --git a/frontend/Dockerfile.frontend b/frontend/Dockerfile.frontend
+index 61efa13..8c183c3 100644
+--- a/frontend/Dockerfile.frontend
++++ b/frontend/Dockerfile.frontend
+@@ -1,41 +1,31 @@
+-FROM node:lts-alpine AS base
++FROM node:lts-bullseye AS base
+ 
+ WORKDIR /app
+ 
+-# Rust環境セットアップ
+-RUN apk update && apk add curl build-base
++RUN apt-get update && apt-get install -y curl build-essential
+ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ ENV PATH="/root/.cargo/bin:${PATH}"
+ 
+-RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
++RUN cargo install wasm-pack --version 0.12.1
++RUN cargo install wasm-bindgen-cli
+ 
+-# pnpmインストール
+ RUN npm install -g pnpm
+ 
+-# package.jsonとworkspace設定をコピー
+ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+-
+-# 依存関係をfetchしてキャッシュ
+ RUN pnpm fetch
+ 
+-# wasmビルドとコピー
+-COPY wasm /tmp/wasm
+-RUN cd /tmp/wasm && wasm-pack build --target web --scope memo-app
++COPY wasm ./wasm
++RUN cd wasm && wasm-pack build --target web --scope memo-app
++
+ RUN mkdir -p /app/packages/wasm
+-RUN cp -r /tmp/wasm/pkg/* /app/packages/wasm/
++RUN cp -r ./wasm/pkg/* /app/packages/wasm/
+ 
+-# frontendをコピー
+ COPY frontend ./frontend
+-
+-# 作業ディレクトリを frontend に変更して install
+ RUN pnpm install --offline --shamefully-hoist
+ 
+ WORKDIR /app/frontend
+-# ビルド
+ RUN pnpm run build
+ 
+ RUN ls /app/node_modules -lan
+ 
+-# 起動コマンド
+-CMD ["pnpm", "run", "dev", "--host"]
+-
++CMD ["pnpm", "run", "dev", "--host"]
+\ No newline at end of file
+diff --git a/frontend/src/Card/Card.tsx b/frontend/src/Card/Card.tsx
+index 29ac43a..623f1af 100644
+--- a/frontend/src/Card/Card.tsx
++++ b/frontend/src/Card/Card.tsx
+@@ -76,6 +76,8 @@ export const Card = (props: {
+       size: size(),
+       title: title(),
+       contents: contents(),
++      tag_ids: [],
++      card_ids: [],
+     });
+   };
+ 
+diff --git a/frontend/src/hooks/useCardAPI.ts b/frontend/src/hooks/useCardAPI.ts
+index cf7f392..076a015 100644
+--- a/frontend/src/hooks/useCardAPI.ts
++++ b/frontend/src/hooks/useCardAPI.ts
+@@ -24,6 +24,7 @@ export const createCard = async (card: Card) => {
+ };
+ 
+ export const updateCard = async (card: Card) => {
++  console.log("Updating card: %o", JSON.stringify(card));
+   await fetchAPI("card", {
+     method: "PATCH",
+     headers: {
+diff --git a/wasm/Cargo.toml b/wasm/Cargo.toml
+index d90e5cd..b979733 100644
+--- a/wasm/Cargo.toml
++++ b/wasm/Cargo.toml
+@@ -22,4 +22,7 @@ web-sys = { version = "0.3", features = [
+     "console",
+     "EventTarget",
+     "MouseEvent"
+-]}
+\ No newline at end of file
++]}
++
++[package.metadata.wasm-pack.profile.release]
++wasm-opt = false
+\ No newline at end of file

@@ -12,8 +12,9 @@ export function useResize(
   getSize: () => Dimmension,
   setSize: (s: Dimmension) => void,
   getScale: () => number,
-  minSize: Dimmension = { x: 20, y: 20 }
+  callback: () => void
 ) {
+  const minSize = { x: 20, y: 20 };
   let originMouse: { x: number; y: number };
   let originPos: Dimmension;
   let originSize: Dimmension;
@@ -59,6 +60,8 @@ export function useResize(
   function onPointerUp(e: PointerEvent) {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
+
+    callback();
     handleEl.releasePointerCapture(e.pointerId);
   }
 

@@ -1,32 +1,37 @@
 import { styled } from "@macaron-css/solid";
-import { createEffect, createSignal, For, on, onMount } from "solid-js";
+import {
+  Accessor,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  onMount,
+  Setter,
+  Show,
+} from "solid-js";
 import { Card } from "../Card/Card.jsx";
 import { Card as CardProps } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
-import { createCard, getCards } from "../hooks/useAPI.js";
+import { createCard, getCards } from "../hooks/useCardAPI.js";
+import { useConnector } from "../hooks/useConnector.js";
+import { Connector } from "../Connector/Connector.jsx";
+import { Path } from "../schema/Path.js";
 
-export const CardContainer = (props: { position: Dimmension }) => {
+export const CardContainer = (props: {
+  position: Dimmension;
+  cards: Accessor<CardProps[]>;
+  setCards: Setter<CardProps[]>;
+  cardRelations: Accessor<number[]>;
+  setCardRelations: Setter<number[]>;
+  setEdittingCard: Setter<CardProps | undefined>;
+}) => {
   let ref!: HTMLDivElement;
-  const tileSize = 5000;
-
-  const [mousePosition, setMousePosition] = createSignal<Dimmension>({
-    x: 0,
-    y: 0,
-  });
-  const [position, setPosition] = createSignal<Dimmension>({
-    x: props.position.x,
-    y: props.position.y,
-  });
-  const [tiles, setTiles] = createSignal<Record<string, CardProps[]>>({});
-  const [nowTile, setNowTile] = createSignal<string>("0,0");
-
-  const { onContextMenu, ContextMenu } = useContextMenu([
-    { label: "作成", action: () => addCard() },
-    { label: "作成", action: () => console.log("作成しました") },
-  ]);
+  let containerRef: HTMLDivElement | undefined;
+  const tileSize = 2000;
 
   const [scale, setScale] = createSignal<number>(1);
   const [zoomLevel, setZoomLevel] = createSignal<number>(0);
@@ -36,6 +41,41 @@ export const CardContainer = (props: { position: Dimmension }) => {
     MIN: -5,
     FACTOR: 1.25,
   };
+
+  const [mousePosition, setMousePosition] = createSignal<Dimmension>({
+    x: 0,
+    y: 0,
+  });
+  const fixedMousePosition = () => ({
+    x: Math.floor(mousePosition().x / scale()),
+    y: Math.floor(mousePosition().y / scale()),
+  });
+
+  const [position, setPosition] = createSignal<Dimmension>({
+    x: props.position.x,
+    y: props.position.y,
+  });
+  const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
+  const [nowTile, setNowTile] = createSignal<string>("0,0");
+  const { currentLine, startConnect } = useConnector({
+    mousePosition: fixedMousePosition,
+    onUpCallback: () => {},
+  });
+
+  const { onContextMenu, ContextMenu } = useContextMenu([
+    { label: "作成", action: () => addCard() },
+    { label: "作成", action: () => console.log("作成しました") },
+  ]);
+
+  const [hoveredCard, setHoveredCard] = createSignal<CardProps | null>(null);
+  const [connectStartedConnector, setConnectStartedConnector] = createSignal<{
+    pos: Dimmension;
+    dir: string;
+  } | null>(null);
+  const [nearestConnector, setNearestConnector] = createSignal<{
+    pos: Dimmension;
+    dir: string;
+  } | null>(null);
 
   const currentTile = () => ({
     x: Math.floor((-position().x + window.innerWidth / 2) / scale() / tileSize),
@@ -78,8 +118,16 @@ export const CardContainer = (props: { position: Dimmension }) => {
             .then((r) => r.json() as Promise<CardProps[]>)
             .then((data) => {
               // console.log(data);
-              setTiles((prev) => ({ ...prev, [key]: data }));
-            });
+              const cards: number[] = [];
+              data.forEach((card) => {
+                if (props.cards().some((c) => c.id === card.id)) return;
+                cards.push(card.id);
+                props.setCards((prev) => [...prev, card]);
+              });
+
+              setTiles((prev) => ({ ...prev, [key]: cards }));
+            })
+            .catch(console.error);
         }
       });
     })
@@ -114,15 +162,20 @@ export const CardContainer = (props: { position: Dimmension }) => {
   );
 
   onMount(() => {
-    useDrag(ref, position, setPosition, () => 1); // Container のスクロールは zoomLevel の範疇外なので factor は 1
+    useDrag({
+      ref,
+      getPos: position,
+      setPos: setPosition,
+      scaleFactor: () => 1,
+    }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
   const addCard = () => {
-    createCard({
+    const newCard = {
       id: 0,
       position: {
-        x: mousePosition().x,
-        y: mousePosition().y,
+        x: fixedMousePosition().x,
+        y: fixedMousePosition().y,
       },
       size: {
         x: 100,
@@ -130,7 +183,11 @@ export const CardContainer = (props: { position: Dimmension }) => {
       },
       title: "",
       contents: "",
-    });
+      tag_ids: [],
+      card_ids: [],
+    };
+    createCard(newCard);
+    props.setCards((prev) => [...prev, newCard]);
   };
 
   const handleScroll = (event: WheelEvent) => {
@@ -146,6 +203,14 @@ export const CardContainer = (props: { position: Dimmension }) => {
     );
   };
 
+  const addCardRelation = (
+    from: CardProps["id"],
+    to: CardProps["id"],
+    parh: Path
+  ) => {
+    props.setCardRelations((prev) => [...prev, [from, to, parh]]);
+  };
+
   const visibleCards = () => {
     const { x: cx, y: cy } = currentTile();
     const neededKeys: string[] = [];
@@ -156,6 +221,43 @@ export const CardContainer = (props: { position: Dimmension }) => {
     }
     // tiles()[key] があれば展開、なければ空配列
     return neededKeys.flatMap((key) => tiles()[key] ?? []);
+  };
+
+  const visibleCardData = createMemo(() =>
+    visibleCards() // number[]
+      .map((id) => props.cards().find((c) => c.id === id))
+      .filter((c): c is CardProps => !!c)
+  );
+
+  const calcRelaxConnectorCtrls = (
+    connector: {
+      pos: Dimmension;
+      dir: string;
+    },
+    relax: number
+  ) => {
+    switch (connector.dir) {
+      case "n":
+        return {
+          x: connector.pos.x,
+          y: connector.pos.y - relax,
+        };
+      case "s":
+        return {
+          x: connector.pos.x,
+          y: connector.pos.y + relax,
+        };
+      case "e":
+        return {
+          x: connector.pos.x + relax,
+          y: connector.pos.y,
+        };
+      case "w":
+        return {
+          x: connector.pos.x - relax,
+          y: connector.pos.y,
+        };
+    }
   };
 
   return (
@@ -178,6 +280,7 @@ export const CardContainer = (props: { position: Dimmension }) => {
         data-card-container
       >
         <div
+          ref={(el) => (containerRef = el!)}
           style={{
             position: "absolute",
             transform: `translate3d(${position().x}px, ${
@@ -185,12 +288,67 @@ export const CardContainer = (props: { position: Dimmension }) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={visibleCards()}>
-            {(card) => <Card card={card} scaleFactor={scale} />}
+          <For each={visibleCardData()}>
+            {(card) => (
+              <Card
+                card={card}
+                setCard={(updated: CardProps) =>
+                  props.setCards((prev) =>
+                    prev.map((c) => (c.id === updated.id ? updated : c))
+                  )
+                }
+                startConnect={(e, pos, cardId) => {
+                  startConnect(e, pos, cardId);
+                  setConnectStartedConnector(nearestConnector());
+                }}
+                setEdittingCard={props.setEdittingCard}
+                scaleFactor={scale}
+                onHover={(c) => setHoveredCard(c)}
+                onLeave={() => {
+                  setHoveredCard(null);
+                  setNearestConnector(null);
+                }}
+                onNearestConnector={(pos, dir) =>
+                  setNearestConnector({ pos, dir })
+                }
+              />
+            )}
           </For>
+          <Show when={currentLine() !== null}>
+            <svg
+              class={style({
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: "100vw",
+                height: "100vh",
+                pointerEvents: "none",
+                overflow: "visible",
+              })}
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <Connector
+                from={connectStartedConnector()?.pos}
+                to={nearestConnector()?.pos || currentLine()!.to}
+                c={{
+                  from: calcRelaxConnectorCtrls(connectStartedConnector(), 50),
+                  to: nearestConnector()?.pos
+                    ? calcRelaxConnectorCtrls(nearestConnector()!, 50)
+                    : currentLine()!.to,
+                }}
+              />
+            </svg>
+          </Show>
         </div>
       </StyledCardContainer>
-      <div class={style({ position: "absolute", left: 0, top: 0 })}>
+      <div
+        class={style({
+          position: "absolute",
+          left: 0,
+          top: 0,
+          pointerEvents: "none",
+        })}
+      >
         <p>{nowTile()}</p>
         <p>
           {position().x},{position().y}
@@ -202,6 +360,11 @@ export const CardContainer = (props: { position: Dimmension }) => {
         <label>
           ZOOM: {zoomLevel()} SCALE: {scale()}
         </label>
+        <p>
+          {nearestConnector()?.pos.x},{nearestConnector()?.pos.y},
+          {nearestConnector()?.dir}
+        </p>
+        <p>{currentLine()?.from.x}</p>
       </div>
       <ContextMenu />
     </>
@@ -214,8 +377,9 @@ const StyledCardContainer = styled("div", {
     display: "block",
     width: "3840px",
     height: "2160px",
+    backgroundColor: "var(--color-bg, #fff)",
     backgroundImage:
-      `linear-gradient(to right, #eee 1px, transparent 1px),` +
-      `linear-gradient(to bottom, #eee 1px, #fcfcfc 1px)`,
+      `linear-gradient(to right, var(--color-bg-border, #eee) 1px, transparent 1px),` +
+      `linear-gradient(to bottom, var(--color-bg-border, #eee) 1px, transparent 1px)`,
   },
 });
