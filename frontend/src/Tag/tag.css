@@ -1,0 +1,9 @@
+.tagify {
+  width: 100%;
+  min-width: max-content;
+  .tagify__input {
+    &::before {
+      z-index: auto;
+    }
+  }
+}

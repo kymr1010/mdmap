@@ -10,6 +10,8 @@ pub struct Card {
     pub size: Dimmension,
     pub title: String,
     pub contents: String,
+    pub tag_ids: Vec<i64>,
+    pub card_ids: Vec<i64>,
 }
 
 #[derive(FromRow)]
@@ -21,4 +23,6 @@ pub struct CardRow {
     pub size_y: f64,
     pub title: String,
     pub contents: String,
+    pub tag_ids: serde_json::Value,
+    pub card_ids: serde_json::Value,
 }

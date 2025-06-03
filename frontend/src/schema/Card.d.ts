@@ -6,4 +6,6 @@ export interface Card {
   size: Dimmension;
   title: string;
   contents: string;
+  tag_ids: number[];
+  card_ids: number[];
 }

@@ -1,41 +1,31 @@
-FROM node:lts-alpine AS base
+FROM node:lts-bullseye AS base
 
 WORKDIR /app
 
-# Rust環境セットアップ
-RUN apk update && apk add curl build-base
+RUN apt-get update && apt-get install -y curl build-essential
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+RUN cargo install wasm-pack --version 0.12.1
+RUN cargo install wasm-bindgen-cli
 
-# pnpmインストール
 RUN npm install -g pnpm
 
-# package.jsonとworkspace設定をコピー
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-
-# 依存関係をfetchしてキャッシュ
 RUN pnpm fetch
 
-# wasmビルドとコピー
-COPY wasm /tmp/wasm
-RUN cd /tmp/wasm && wasm-pack build --target web --scope memo-app
+COPY wasm ./wasm
+RUN cd wasm && wasm-pack build --target web --scope memo-app
+
 RUN mkdir -p /app/packages/wasm
-RUN cp -r /tmp/wasm/pkg/* /app/packages/wasm/
+RUN cp -r ./wasm/pkg/* /app/packages/wasm/
 
-# frontendをコピー
 COPY frontend ./frontend
-
-# 作業ディレクトリを frontend に変更して install
 RUN pnpm install --offline --shamefully-hoist
 
 WORKDIR /app/frontend
-# ビルド
 RUN pnpm run build
 
 RUN ls /app/node_modules -lan
 
-# 起動コマンド
 CMD ["pnpm", "run", "dev", "--host"]
-

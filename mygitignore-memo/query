@@ -1,0 +1,28 @@
+SELECT
+  id,
+  title,
+  -- 外周の 1 点目 = (MINX, MINY)
+  ST_X(ST_PointN(ST_ExteriorRing(shape), 1)) AS pos_x,
+  ST_Y(ST_PointN(ST_ExteriorRing(shape), 1)) AS pos_y,
+
+  -- 外周の 3 点目 = (MAXX, MAXY) との差分で幅・高さを算出
+  ST_X(ST_PointN(ST_ExteriorRing(shape), 3))
+    - ST_X(ST_PointN(ST_ExteriorRing(shape), 1)) AS size_w,
+  ST_Y(ST_PointN(ST_ExteriorRing(shape), 3))
+    - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1)) AS size_h
+FROM cards
+WHERE MBRIntersects(
+  shape,
+  ST_GeomFromText(
+    'POLYGON((0 0, 5000 0, 5000 5000, 0 5000, 0 0))'
+  )
+);
+
+SELECT
+    ST_X(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_x,
+    ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_y,
+    (ST_X(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_X(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_x,
+    (ST_Y(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_y,
+    id, title, contents
+FROM cards
+WHERE MBRIntersects(shape, ST_GeomFromText('POLYGON((0 0, 5000 0, 5000 5000, 0 5000, 0 0 ))'));

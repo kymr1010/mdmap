@@ -1,16 +1,32 @@
 import { styled } from "@macaron-css/solid";
-import { createEffect, createSignal, For, on, onMount } from "solid-js";
+import {
+  Accessor,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  onMount,
+  Setter,
+} from "solid-js";
 import { Card } from "../Card/Card.jsx";
 import { Card as CardProps } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
-import { createCard, getCards } from "../hooks/useAPI.js";
+import { createCard, getCards } from "../hooks/useCardAPI.js";
+import { useConnector } from "../hooks/useConnector.js";
 
-export const CardContainer = (props: { position: Dimmension }) => {
+export const CardContainer = (props: {
+  position: Dimmension;
+  setCards: Setter<CardProps[]>;
+  cards: Accessor<CardProps[]>;
+  setEdittingCard: Setter<CardProps | undefined>;
+}) => {
   let ref!: HTMLDivElement;
-  const tileSize = 5000;
+  let containerRef: HTMLDivElement | undefined;
+  const tileSize = 2000;
 
   const [mousePosition, setMousePosition] = createSignal<Dimmension>({
     x: 0,
@@ -20,8 +36,12 @@ export const CardContainer = (props: { position: Dimmension }) => {
     x: props.position.x,
     y: props.position.y,
   });
-  const [tiles, setTiles] = createSignal<Record<string, CardProps[]>>({});
+  const cardIDs = new Set<number>();
+  const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
+  const { connections, currentLine, startConnect } = useConnector(
+    () => containerRef
+  );
 
   const { onContextMenu, ContextMenu } = useContextMenu([
     { label: "作成", action: () => addCard() },
@@ -78,8 +98,16 @@ export const CardContainer = (props: { position: Dimmension }) => {
             .then((r) => r.json() as Promise<CardProps[]>)
             .then((data) => {
               // console.log(data);
-              setTiles((prev) => ({ ...prev, [key]: data }));
-            });
+              const cards: number[] = [];
+              data.forEach((card) => {
+                if (props.cards().some((c) => c.id === card.id)) return;
+                cards.push(card.id);
+                props.setCards((prev) => [...prev, card]);
+              });
+
+              setTiles((prev) => ({ ...prev, [key]: cards }));
+            })
+            .catch(console.error);
         }
       });
     })
@@ -114,7 +142,12 @@ export const CardContainer = (props: { position: Dimmension }) => {
   );
 
   onMount(() => {
-    useDrag(ref, position, setPosition, () => 1); // Container のスクロールは zoomLevel の範疇外なので factor は 1
+    useDrag({
+      ref,
+      getPos: position,
+      setPos: setPosition,
+      scaleFactor: () => 1,
+    }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
   const addCard = () => {
@@ -130,6 +163,8 @@ export const CardContainer = (props: { position: Dimmension }) => {
       },
       title: "",
       contents: "",
+      tag_ids: [],
+      card_ids: [],
     });
   };
 
@@ -158,6 +193,12 @@ export const CardContainer = (props: { position: Dimmension }) => {
     return neededKeys.flatMap((key) => tiles()[key] ?? []);
   };
 
+  const visibleCardData = createMemo(() =>
+    visibleCards() // number[]
+      .map((id) => props.cards().find((c) => c.id === id))
+      .filter((c): c is CardProps => !!c)
+  );
+
   return (
     <>
       <StyledCardContainer
@@ -178,6 +219,7 @@ export const CardContainer = (props: { position: Dimmension }) => {
         data-card-container
       >
         <div
+          ref={(el) => (containerRef = el!)}
           style={{
             position: "absolute",
             transform: `translate3d(${position().x}px, ${
@@ -185,9 +227,56 @@ export const CardContainer = (props: { position: Dimmension }) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={visibleCards()}>
-            {(card) => <Card card={card} scaleFactor={scale} />}
+          <For each={visibleCardData()}>
+            {(card) => (
+              <Card
+                card={card}
+                setCard={(updated) =>
+                  props.setCards((prev) =>
+                    prev.map((c) => (c.id === updated.id ? updated : c))
+                  )
+                }
+                startConnect={startConnect}
+                setEdittingCard={props.setEdittingCard}
+                scaleFactor={scale}
+              />
+            )}
           </For>
+          <svg
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              "pointer-events": "none",
+            }}
+          >
+            {/* 確定済みの接続線 */}
+            <For each={connections()}>
+              {(conn) => (
+                <line
+                  x1={conn.from.x}
+                  y1={conn.from.y}
+                  x2={conn.to.x}
+                  y2={conn.to.y}
+                  stroke="#4A90E2"
+                  stroke-width="2"
+                />
+              )}
+            </For>
+            {/* ドラッグ中の線 */}
+            {currentLine() && (
+              <line
+                x1={currentLine()!.x1}
+                y1={currentLine()!.y1}
+                x2={currentLine()!.x2}
+                y2={currentLine()!.y2}
+                stroke="#888"
+                stroke-dasharray="4 2"
+              />
+            )}
+          </svg>
         </div>
       </StyledCardContainer>
       <div class={style({ position: "absolute", left: 0, top: 0 })}>
@@ -214,8 +303,9 @@ const StyledCardContainer = styled("div", {
     display: "block",
     width: "3840px",
     height: "2160px",
+    backgroundColor: "var(--color-bg, #fff)",
     backgroundImage:
-      `linear-gradient(to right, #eee 1px, transparent 1px),` +
-      `linear-gradient(to bottom, #eee 1px, #fcfcfc 1px)`,
+      `linear-gradient(to right, var(--color-bg-border, #eee) 1px, transparent 1px),` +
+      `linear-gradient(to bottom, var(--color-bg-border, #eee) 1px, transparent 1px)`,
   },
 });
