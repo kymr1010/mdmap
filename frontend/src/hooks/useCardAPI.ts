@@ -1,10 +1,5 @@
 import { Card } from "../schema/Card.js";
-
-export const fetchAPI = async (url: string, options: RequestInit) => {
-  const res = await fetch(`http://localhost:8082/${url}`, options);
-  console.log(res);
-  return res.json();
-};
+import { fetchAPI } from "./useAPI.js";
 
 export const getCards = async () => {
   const cards = await fetchAPI("cards", {

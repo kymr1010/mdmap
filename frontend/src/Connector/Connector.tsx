@@ -1,11 +1,11 @@
 import { Path } from "../schema/Path.js";
 
-export const Connector = (props: Path) => {
-  const pointsString = (props.c.points ?? [])
+export const Connector = (props: { path: Path }) => {
+  const pointsString = (props.path.c.points ?? [])
     .map(({ c, p }) => `S${p.x} ${p.y},${c.x} ${c.y}`)
     .join(",");
   const pathString = () =>
-    `M${props.from.x} ${props.from.y} C${props.c.from.x} ${props.c.from.y}, ${props.c.to.x} ${props.c.to.y}, ${props.to.x} ${props.to.y}`;
+    `M${props.path.from.x} ${props.path.from.y} C${props.path.c.from.x} ${props.path.c.from.y}, ${props.path.c.to.x} ${props.path.c.to.y}, ${props.path.to.x} ${props.path.to.y}`;
 
   return <path d={pathString()} stroke="black" fill="none" />;
 };

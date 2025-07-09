@@ -20,6 +20,7 @@ import { createCard, getCards } from "../hooks/useCardAPI.js";
 import { useConnector } from "../hooks/useConnector.js";
 import { Connector } from "../Connector/Connector.jsx";
 import { Path } from "../schema/Path.js";
+import { connectCards } from "../hooks/useConnectAPI.js";
 
 export const CardContainer = (props: {
   position: Dimmension;
@@ -59,7 +60,12 @@ export const CardContainer = (props: {
   const [nowTile, setNowTile] = createSignal<string>("0,0");
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
-    onUpCallback: () => {},
+    onUpCallback: async (fromID: CardProps["id"]) => {
+      console.log("onUpCallback", nearestConnector());
+      const card_parent_id = fromID;
+      const card_child_id = nearestConnector().cardId;
+      await connectCards(card_parent_id, card_child_id, connectPath());
+    },
   });
 
   const { onContextMenu, ContextMenu } = useContextMenu([
@@ -75,6 +81,7 @@ export const CardContainer = (props: {
   const [nearestConnector, setNearestConnector] = createSignal<{
     pos: Dimmension;
     dir: string;
+    cardId: CardProps["id"];
   } | null>(null);
 
   const currentTile = () => ({
@@ -113,7 +120,7 @@ export const CardContainer = (props: {
           const maxY = minY + tileSize;
 
           fetch(
-            `http://localhost:8082/cards?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
+            `http://localhost:8082/cards/in_range?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
           )
             .then((r) => r.json() as Promise<CardProps[]>)
             .then((data) => {
@@ -260,6 +267,19 @@ export const CardContainer = (props: {
     }
   };
 
+  const connectPath = (): Path => {
+    return {
+      from: connectStartedConnector()?.pos,
+      to: nearestConnector()?.pos || currentLine()!.to,
+      c: {
+        from: calcRelaxConnectorCtrls(connectStartedConnector(), 50),
+        to: nearestConnector()?.pos
+          ? calcRelaxConnectorCtrls(nearestConnector()!, 50)
+          : currentLine()!.to,
+      },
+    };
+  };
+
   return (
     <>
       <StyledCardContainer
@@ -308,8 +328,8 @@ export const CardContainer = (props: {
                   setHoveredCard(null);
                   setNearestConnector(null);
                 }}
-                onNearestConnector={(pos, dir) =>
-                  setNearestConnector({ pos, dir })
+                onNearestConnector={(pos, dir, cardId) =>
+                  setNearestConnector({ pos, dir, cardId })
                 }
               />
             )}
@@ -327,16 +347,7 @@ export const CardContainer = (props: {
               })}
               xmlns="http://www.w3.org/2000/svg"
             >
-              <Connector
-                from={connectStartedConnector()?.pos}
-                to={nearestConnector()?.pos || currentLine()!.to}
-                c={{
-                  from: calcRelaxConnectorCtrls(connectStartedConnector(), 50),
-                  to: nearestConnector()?.pos
-                    ? calcRelaxConnectorCtrls(nearestConnector()!, 50)
-                    : currentLine()!.to,
-                }}
-              />
+              <Connector path={connectPath()} />
             </svg>
           </Show>
         </div>
@@ -362,7 +373,7 @@ export const CardContainer = (props: {
         </label>
         <p>
           {nearestConnector()?.pos.x},{nearestConnector()?.pos.y},
-          {nearestConnector()?.dir}
+          {nearestConnector()?.dir},{nearestConnector()?.cardId}
         </p>
         <p>{currentLine()?.from.x}</p>
       </div>

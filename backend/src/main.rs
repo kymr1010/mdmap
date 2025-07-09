@@ -1,6 +1,5 @@
 use axum::Extension;
 use std::net::SocketAddr;
-use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 
 // mod config;
@@ -25,9 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_headers(Any);
 
     // ルーター組み立て
-    let app = routes::router()
-        .layer(cors)
-        .layer(Extension(pool));
+    let app = routes::router().layer(cors).layer(Extension(pool));
 
     // サーバ起動
     let addr = SocketAddr::from(([0, 0, 0, 0], 8082));

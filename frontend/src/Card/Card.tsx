@@ -31,7 +31,11 @@ export const Card = (props: {
   startConnect: (e: PointerEvent, pos: Dimmension, cardId: number) => void;
   onHover: (c: CardProps) => void;
   onLeave: () => void;
-  onNearestConnector: (pos: Dimmension, dir: string) => void;
+  onNearestConnector: (
+    pos: Dimmension,
+    dir: string,
+    cardId: CardProps["id"]
+  ) => void;
 }) => {
   let ref!: HTMLDivElement;
 
@@ -145,6 +149,7 @@ export const Card = (props: {
         }}
         onMouseLeave={() => {
           setIsHovered(false);
+          console.log("Card.onMouseLeave");
           props.onLeave();
         }}
         onPointerDown={(e) => {
@@ -170,6 +175,7 @@ export const Card = (props: {
             <div
               innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
             ></div>
+            <p>{props.card.id}</p>
           </div>
           {dirs.map((dir) => (
             <div
@@ -185,7 +191,9 @@ export const Card = (props: {
               onPointerDown={(e) =>
                 props.startConnect(e, { x, y }, props.card.id)
               }
-              onMouseEnter={(e) => props.onNearestConnector?.({ x, y }, dir)}
+              onMouseEnter={(e) =>
+                props.onNearestConnector({ x, y }, dir, props.card.id)
+              }
               style={getConnectHandleStyle(dir, size(), isHovered)}
             />
           ))}

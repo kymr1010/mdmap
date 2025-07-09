@@ -6,6 +6,55 @@ use axum::{extract::Query, http::StatusCode, response::IntoResponse, Extension, 
 use serde_json::json;
 use sqlx::{Executor, MySql, Pool, Transaction};
 
+pub async fn get_cards(Extension(pool): Extension<Pool<sqlx::MySql>>) -> Json<Vec<Card>> {
+    let rows = sqlx::query_as::<_, CardRow>(r#"
+            SELECT
+                ST_X(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_x,
+                ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_y,
+                (ST_X(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_X(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_x,
+                (ST_Y(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_y,
+                c.id, c.title, c.contents,
+                COALESCE(
+                    JSON_ARRAYAGG(
+                        JSON_OBJECT('id', ct.tag_id)
+                    )
+                , JSON_ARRAY())                                                        AS tag_ids,
+                COALESCE(
+                    JSON_ARRAYAGG(
+                        JSON_OBJECT('id', cc.card_child_id)
+                    )
+                , JSON_ARRAY())                                                        AS card_ids
+            FROM cards c
+        "#)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default();
+
+    let rows: Vec<Card> = rows
+        .into_iter()
+        .map(|r| {
+            let tag_ids: Vec<i64> = serde_json::from_value(r.tag_ids).unwrap_or_default();
+            let card_ids: Vec<i64> = serde_json::from_value(r.card_ids).unwrap_or_default();
+            Card {
+                id: r.id,
+                title: r.title,
+                contents: r.contents,
+                position: Dimmension {
+                    x: r.pos_x,
+                    y: r.pos_y,
+                },
+                size: Dimmension {
+                    x: r.size_x,
+                    y: r.size_y,
+                },
+                tag_ids,
+                card_ids,
+            }
+        })
+        .collect();
+
+    Json(rows)
+}
 pub async fn get_cards_in_range(
     Extension(pool): Extension<Pool<sqlx::MySql>>,
     Query(params): Query<RangeParams>,
