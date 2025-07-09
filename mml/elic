@@ -1,0 +1,42 @@
+SoundType={soundfont}
+Tempo=77
+調＃（ドファ）
+
+TR=01 CH=01 @5
+o6
+r1. r1.
+
+r fagfc<b>cd<a2.
+f1.> r1.
+
+r fagfc<b>cd<a2.>
+c2. f2.<e1.
+
+r2. ab>c-ed<b>dc-<b>
+d2. r2 d
+
+TR=02 CH=01
+o4
+r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+
+r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+
+r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+r 'acf'2 r 'bdf'2 r 'gab'2 r 'bdg'2
+
+r '<f->ad'2 r 'ac-e'2 r 'gbe'2 r '<d>gbe'2
+r '<c-f>a'2 r '<c->ga'2
+
+TR=03 CH=01 
+o3 
+g2. d2. g2. d2.
+
+g2. d2. g2. d2.
+g2. d2. g2. d2.
+
+g2. d2. g2. d2.
+g2.<b2.>e2. e2.
+
+d2.<a2.>d2. d2.
+d2. d2. d2. d2.
