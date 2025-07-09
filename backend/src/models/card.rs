@@ -10,8 +10,8 @@ pub struct Card {
     pub size: Dimmension,
     pub title: String,
     pub contents: String,
+    pub parent_id: Option<i64>,
     pub tag_ids: Vec<i64>,
-    pub card_ids: Vec<i64>,
 }
 
 #[derive(FromRow)]
@@ -23,6 +23,27 @@ pub struct CardRow {
     pub size_y: f64,
     pub title: String,
     pub contents: String,
+    pub parent_id: Option<i64>,
     pub tag_ids: serde_json::Value,
-    pub card_ids: serde_json::Value,
+}
+
+impl From<CardRow> for Card {
+    fn from(r: CardRow) -> Self {
+        let tag_ids: Vec<i64> = serde_json::from_value(r.tag_ids).unwrap_or_default();
+        Card {
+            id: r.id,
+            title: r.title,
+            contents: r.contents,
+            position: Dimmension {
+                x: r.pos_x,
+                y: r.pos_y,
+            },
+            size: Dimmension {
+                x: r.size_x,
+                y: r.size_y,
+            },
+            parent_id: r.parent_id,
+            tag_ids,
+        }
+    }
 }

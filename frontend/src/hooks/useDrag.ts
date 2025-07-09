@@ -1,4 +1,4 @@
-import { onCleanup } from "solid-js";
+import { Accessor, onCleanup } from "solid-js";
 import { Dimmension } from "../schema/Point.js";
 
 // ref: ドラッグ対象の要素
@@ -9,14 +9,15 @@ export function useDrag(props: {
   getPos: () => Dimmension;
   setPos: (pos: Dimmension) => void;
   scaleFactor: () => number;
-  callback?: () => void;
+  mousePosition: Accessor<Dimmension>;
+  moveCallback?: (diff: Dimmension) => void;
+  upCallback?: (diff: Dimmension) => void;
 }) {
   // タッチデバイスでの既定の “パン” を無効化
   props.ref.style.touchAction = "none";
 
   let origin: Dimmension = { x: 0, y: 0 };
-
-  const callback = props.callback || (() => {});
+  let beforePos: Dimmension = { x: 0, y: 0 };
 
   const onPointerDown = (e: PointerEvent) => {
     // 重なっている要素への伝播を止める
@@ -28,8 +29,12 @@ export function useDrag(props: {
     // この要素にポインタをキャプチャ（ムーブ／アップもこの要素で受ける）
     props.ref.setPointerCapture(e.pointerId);
 
+    // 位置を記憶
+    beforePos = props.getPos();
+
     // マウス座標と要素左上とのオフセットを記憶
     const pos = props.getPos();
+
     origin = {
       x: Math.floor(e.clientX / props.scaleFactor() - pos.x),
       y: Math.floor(e.clientY / props.scaleFactor() - pos.y),
@@ -45,12 +50,21 @@ export function useDrag(props: {
       x: Math.floor(e.clientX / props.scaleFactor() - origin.x),
       y: Math.floor(e.clientY / props.scaleFactor() - origin.y),
     });
+    if (props.moveCallback !== undefined)
+      props.moveCallback({
+        x: Math.floor(e.clientX / props.scaleFactor() - beforePos.x),
+        y: Math.floor(e.clientY / props.scaleFactor() - beforePos.y),
+      });
   };
 
   const onPointerUp = (e: PointerEvent) => {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
-    callback();
+    if (props.upCallback !== undefined)
+      props.upCallback({
+        x: Math.floor(e.clientX / props.scaleFactor() - beforePos.x),
+        y: Math.floor(e.clientY / props.scaleFactor() - beforePos.y),
+      });
     props.ref.releasePointerCapture(e.pointerId);
   };
 

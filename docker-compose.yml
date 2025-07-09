@@ -21,8 +21,6 @@ services:
       - "8082:8082"
     env_file:
       - .env
-    command: >
-      sh -c "cargo sqlx migrate run && cargo run"
     volumes:
       - ./backend:/app
       - cargo-target:/app/target

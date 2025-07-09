@@ -6,6 +6,9 @@ export interface Card {
   size: Dimmension;
   title: string;
   contents: string;
+  parent_id?: Card["id"];
   tag_ids: number[];
-  card_ids: number[];
 }
+
+export type Dir = "n" | "s" | "e" | "w";
+export type Dir8 = dir | "ne" | "nw" | "se" | "sw";
