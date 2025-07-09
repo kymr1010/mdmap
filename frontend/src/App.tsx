@@ -5,6 +5,8 @@ import { globalStyle } from "@macaron-css/core";
 import { EditorPanel } from "./EditorPanel/EditorPanel.jsx";
 import { Card } from "./schema/Card.js";
 import { updateCard } from "./hooks/useCardAPI.js";
+import { getCardRelations } from "./hooks/useConnectAPI.js";
+import { CardRelation } from "./schema/CardRelation.js";
 
 globalStyle("body", {
   "--color-bg": "#fff",
@@ -15,6 +17,7 @@ globalStyle("body", {
 //   "--color-bg": "#111",
 //   "--color-bg-border": "#0f0",
 // });
+
 globalStyle("body", {
   fontFamily: `-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
           Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji" !important;`,
@@ -25,13 +28,17 @@ globalStyle("pre, code", {
 });
 
 function App() {
-  const [edittingCard, setEdittingCard] = createSignal<Card | undefined>();
+  const [edittingCard, setEdittingCard] = createSignal<Card | null>(null);
   const [cards, setCards] = createSignal<Card[]>([]);
-  const [cardRelations, setCardRelations] = createSignal([]);
+  const [cardRelations, setCardRelations] = createSignal<CardRelation[]>([]);
 
   onMount(async () => {
     const res = await fetch("http://localhost:8082/");
     const text = await res.text();
+    const rels = await getCardRelations();
+    console.log(rels);
+    setCardRelations(rels);
+    console.log(cardRelations());
     console.log(text); // "Hello, World! 🎉"
     // init();
   });
@@ -67,10 +74,10 @@ function App() {
           });
         }}
         onSave={(card) => {
-          if (card != undefined) updateCard(card);
-          setEdittingCard(undefined);
+          if (!card) updateCard(card);
+          setEdittingCard(null);
         }}
-        onCancel={() => setEdittingCard(undefined)}
+        onCancel={() => setEdittingCard(null)}
       />
     </div>
   );

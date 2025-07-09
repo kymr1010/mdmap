@@ -1,7 +1,7 @@
 use axum::Extension;
 use std::net::SocketAddr;
-use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 
 // mod config;
 mod db;
@@ -24,9 +24,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let trace = TraceLayer::new_for_http();
+
     // ルーター組み立て
     let app = routes::router()
         .layer(cors)
+        .layer(trace)
         .layer(Extension(pool));
 
     // サーバ起動

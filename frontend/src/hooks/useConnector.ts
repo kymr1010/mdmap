@@ -1,10 +1,11 @@
 import { Accessor, createSignal, onCleanup } from "solid-js";
 import { Dimmension } from "../schema/Point.js";
 import { Card } from "../schema/Card.js";
+import { Path } from "../schema/Connrctor.js";
 
 export function useConnector(props: {
   mousePosition: Accessor<Dimmension>;
-  onUpCallback: (fromId: Card["id"]) => void;
+  onUpCallback: (fromID: Card["id"]) => void;
 }) {
   const [currentLine, setCurrentLine] = createSignal<{
     from: Dimmension;
@@ -15,7 +16,7 @@ export function useConnector(props: {
     startY = 0,
     fromId: number;
 
-  function startConnect(e: PointerEvent, pos: Dimmension, cardId: number) {
+  function startConnect(e: PointerEvent, pos: Dimmension, cardId: Card["id"]) {
     e.stopPropagation();
     console.log("startConnect");
     startX = pos.x;
@@ -30,7 +31,7 @@ export function useConnector(props: {
       from: { x: startX, y: startY },
       to: { x: props.mousePosition().x, y: props.mousePosition().y },
     });
-    console.log("onMove", currentLine());
+    // console.log("onMove", currentLine());
   }
 
   function onUp(e: PointerEvent) {

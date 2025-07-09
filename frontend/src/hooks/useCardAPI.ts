@@ -1,19 +1,16 @@
 import { Card } from "../schema/Card.js";
-
-export const fetchAPI = async (url: string, options: RequestInit) => {
-  const res = await fetch(`http://localhost:8082/${url}`, options);
-  console.log(res);
-  return res.json();
-};
+import { fetchAPI } from "./useAPI.js";
 
 export const getCards = async () => {
-  const cards = await fetchAPI("cards", {
+  const res = await fetchAPI("cards", {
     method: "GET",
   });
-  return cards;
+  console.log(res);
+  return res.data;
 };
 
 export const createCard = async (card: Card) => {
+  console.log("Creating card: %o", JSON.stringify(card));
   await fetchAPI("card", {
     method: "POST",
     headers: {

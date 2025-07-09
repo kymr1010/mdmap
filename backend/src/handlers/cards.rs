@@ -1,83 +1,42 @@
 use crate::{
-    models::{Card, CardRow},
-    schema::{Dimmension, RangeParams},
+    db::{fetch_all_card_rows, fetch_card_row_by_id, fetch_card_rows_in_range},
+    models::{ApiResponse, Card, CardParams},
+    schema::RangeParams,
 };
 use axum::{extract::Query, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
-use sqlx::{Executor, MySql, Pool, Transaction};
+use sqlx::{MySql, Pool};
+
+pub async fn get_cards(Extension(pool): Extension<Pool<sqlx::MySql>>) -> ApiResponse<Vec<Card>> {
+    match fetch_all_card_rows(&pool).await {
+        Ok(rows) => {
+            let cards = rows.into_iter().map(Card::from).collect();
+            ApiResponse::new_ok(StatusCode::OK, cards)
+        }
+        Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
 
 pub async fn get_cards_in_range(
-    Extension(pool): Extension<Pool<sqlx::MySql>>,
+    Extension(pool): Extension<Pool<MySql>>,
     Query(params): Query<RangeParams>,
-) -> Json<Vec<Card>> {
-    // クエリパラメータをもとに矩形ポリゴンを WKT で作成
+) -> ApiResponse<Vec<Card>> {
+    // WKT ポリゴンを作成
     let poly = create_poly(params.min_x, params.min_y, params.max_x, params.max_y);
 
-    println!("{}", poly);
-
-    // MBRIntersects で当たり判定
-    let rows = match sqlx::query_as::<_, CardRow>(r#"
-            SELECT
-                ST_X(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_x,
-                ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))                             AS pos_y,
-                (ST_X(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_X(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_x,
-                (ST_Y(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_y,
-                c.id, c.title, c.contents,
-                COALESCE(
-                    JSON_ARRAYAGG(
-                        JSON_OBJECT('id', ct.tag_id)
-                    )
-                , JSON_ARRAY())                                                        AS tag_ids,
-                COALESCE(
-                    JSON_ARRAYAGG(
-                        JSON_OBJECT('id', cc.card_child_id)
-                    )
-                , JSON_ARRAY())                                                        AS card_ids
-            FROM cards as c
-            LEFT JOIN card_tag AS ct ON ct.card_id = c.id
-            LEFT JOIN card_card AS cc ON cc.card_parent_id = c.id
-            WHERE MBRIntersects(shape, ST_GeomFromText(?))
-            GROUP BY c.id, c.title, c.contents, pos_x, pos_y, size_x, size_y;
-        "#)
-        .bind(&poly)
-        .fetch_all(&pool)
-        .await {
-            Ok(n) => {n},
-            Err(e) => {println!("{}", e); Vec::new()},
-        };
-
-    let cards: Vec<Card> = rows
-        .into_iter()
-        .map(|r| {
-            let tag_ids: Vec<i64> = serde_json::from_value(r.tag_ids).unwrap_or_default();
-            let card_ids: Vec<i64> = serde_json::from_value(r.card_ids).unwrap_or_default();
-            Card {
-                id: r.id,
-                position: Dimmension {
-                    x: r.pos_x,
-                    y: r.pos_y,
-                },
-                size: Dimmension {
-                    x: r.size_x,
-                    y: r.size_y,
-                },
-                title: r.title,
-                contents: r.contents,
-                tag_ids,
-                card_ids,
-            }
-        })
-        .collect();
-
-    println!("Found {} cards in range.", cards.len());
-
-    Json(cards)
+    match fetch_card_rows_in_range(&pool, &poly).await {
+        Ok(rows) => {
+            let cards = rows.into_iter().map(Card::from).collect();
+            ApiResponse::new_ok(StatusCode::OK, cards)
+        }
+        Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 pub async fn create_card(
     Extension(pool): Extension<Pool<sqlx::MySql>>,
-    Json(params): Json<Card>,
-) -> impl IntoResponse {
+    Json(params): Json<CardParams>,
+) -> ApiResponse<Card> {
     let mut tx = pool.begin().await.expect("transaction error.");
 
     let poly = create_poly(
@@ -99,56 +58,52 @@ pub async fn create_card(
     .execute(&mut *tx)
     .await;
 
-    let card_id = match res {
-        Ok(result) => result.last_insert_id() as i64,
+    let res = match res {
+        Ok(result) => result,
         Err(e) => {
             let _ = tx.rollback().await;
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"message": e.to_string()})),
-            );
+            return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
         }
     };
 
-    if !params.tag_ids.is_empty() {
-        for tag_id in &params.tag_ids {
-            if let Err(e) = sqlx::query(
-                r#"
-                INSERT INTO card_tag (card_id, tag_id)
-                VALUES (?, ?)
-            "#,
-            )
-            .bind(card_id)
-            .bind(tag_id)
-            .execute(&mut *tx)
-            .await
-            {
-                let _ = tx.rollback().await;
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"message": e.to_string()})),
-                );
-            }
-        }
-    };
+    let card_id = res.last_insert_id() as i64;
+
+    // if !params.tag_ids.is_empty() {
+    //     for tag_id in &params.tag_ids {
+    //         if let Err(e) = sqlx::query(
+    //             r#"
+    //             INSERT INTO card_tag (card_id, tag_id)
+    //             VALUES (?, ?)
+    //         "#,
+    //         )
+    //         .bind(card_id)
+    //         .bind(tag_id)
+    //         .execute(&mut *tx)
+    //         .await
+    //         {
+    //             let _ = tx.rollback().await;
+    //             return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    //         }
+    //     }
+    // };
 
     if let Err(e) = tx.commit().await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"message": format!("Failed to commit transaction: {}", e)})),
-        );
+        return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
     }
 
-    (
-        StatusCode::CREATED,
-        Json(json!({"message":"Success", "card_id": card_id})),
-    )
+    match fetch_card_row_by_id(&pool, card_id).await {
+        Ok(row) => {
+            let card = Card::from(row);
+            ApiResponse::new_ok(StatusCode::OK, card)
+        }
+        Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
 }
 
 pub async fn update_card(
     Extension(pool): Extension<Pool<sqlx::MySql>>,
-    Json(params): Json<Card>,
-) -> impl IntoResponse {
+    Json(params): Json<CardParams>,
+) -> ApiResponse<Card> {
     let poly = create_poly(
         params.position.x,
         params.position.y,
@@ -171,16 +126,14 @@ pub async fn update_card(
     .await;
 
     match result {
-        Ok(_) => (
-            StatusCode::ACCEPTED,
-            Json(json!({"code": StatusCode::ACCEPTED.to_string(), "message":"Success"})),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(
-                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
-            ),
-        ),
+        Ok(_) => match fetch_card_row_by_id(&pool, params.id).await {
+            Ok(row) => {
+                let card = Card::from(row);
+                ApiResponse::new_ok(StatusCode::OK, card)
+            }
+            Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 

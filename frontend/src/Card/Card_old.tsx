@@ -10,7 +10,7 @@ import {
   Show,
 } from "solid-js";
 import { styled } from "@macaron-css/solid";
-import type { Card, Dir, Dir8 } from "../schema/Card.js";
+import type { Card } from "../schema/Card.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { Dimmension } from "../schema/Point.js";
 import { marked } from "marked";
@@ -22,30 +22,32 @@ import { Portal } from "solid-js/web";
 import { updateCard } from "../hooks/useCardAPI.js";
 import { EditorPanel } from "../EditorPanel/EditorPanel.jsx";
 import { TagInput } from "../Tag/Tag.jsx";
-import { CardConnectorPoint } from "../schema/Connrctor.js";
 
 export interface CardProps {
   mousePosition: Accessor<Dimmension>;
-  card: Accessor<Card>;
-  absPosition: [Accessor<Dimmension>, Setter<Dimmension>];
+  card: Card;
   setCard: (card: Card) => void;
   scaleFactor: Accessor<number>;
-  setEdittingCard: Setter<Card | null>;
+  setEdittingCard: Setter<Card | undefined>;
   startConnect: (e: PointerEvent, pos: Dimmension, cardId: number) => void;
   onHover: (c: Card) => void;
   onLeave: () => void;
-  onNearestConnector: (cardConnectorPoint: CardConnectorPoint) => void;
+  onNearestConnector: (
+    pos: Dimmension,
+    dir: string,
+    cardId: Card["id"]
+  ) => void;
   onMove: (pos: Dimmension) => void;
 }
 
 export const CardElm = (props: CardProps) => {
   let ref!: HTMLDivElement;
 
-  const [pos, setPos] = props.absPosition;
-  const [size, setSize] = createSignal<Dimmension>({ ...props.card().size });
-  const [title, setTitle] = createSignal(props.card().title);
-  const [tags, setTags] = createSignal(props.card().tag_ids);
-  const [contents, setContents] = createSignal(props.card().contents);
+  const [pos, setPos] = createSignal<Dimmension>({ ...props.card.position });
+  const [size, setSize] = createSignal<Dimmension>({ ...props.card.size });
+  const [title, setTitle] = createSignal(props.card.title);
+  const [tags, setTags] = createSignal(props.card.tag_ids);
+  const [contents, setContents] = createSignal(props.card.contents);
   const [isEditing, setIsEditing] = createSignal(false);
   const [isHovered, setIsHovered] = createSignal(false);
 
@@ -55,7 +57,7 @@ export const CardElm = (props: CardProps) => {
       label: "編集",
       action: () => {
         setIsEditing(true);
-        props.setEdittingCard(props.card());
+        props.setEdittingCard(props.card);
       },
     },
     { label: "削除", action: () => console.log("削除しました") },
@@ -72,12 +74,16 @@ export const CardElm = (props: CardProps) => {
       setPos: setPos,
       scaleFactor: props.scaleFactor,
       mousePosition: props.mousePosition,
-      moveCallback: props.onMove,
+      moveCallback: (diff: Dimmension) => {},
       upCallback: (diff: Dimmension) => {
-        console.log(props.card());
         const newCard = {
-          ...props.card(),
+          id: props.card.id,
           position: pos(),
+          size: size(),
+          title: title(),
+          tag_ids: tags(),
+          contents: contents(),
+          card_ids: [],
         };
         props.setCard(newCard);
         updateCard(newCard);
@@ -94,7 +100,7 @@ export const CardElm = (props: CardProps) => {
         props.scaleFactor,
         () => {
           const newCard = {
-            id: props.card().id,
+            id: props.card.id,
             position: pos(),
             size: size(),
             title: title(),
@@ -109,31 +115,33 @@ export const CardElm = (props: CardProps) => {
     );
   });
 
-  createEffect(() => setPos({ ...props.card().position }));
-  createEffect(() => setSize({ ...props.card().size }));
+  // 外部 props.card が変わったら反映
+  createEffect(() => setPos({ ...props.card.position }));
+  createEffect(() => setSize({ ...props.card.size }));
+  // （title/contents はユーザー編集で overwrite するので同期しない）
 
   const handleSaveCard = () => {
     updateCard({
-      id: props.card().id,
+      id: props.card.id,
       position: pos(),
       size: size(),
       title: title(),
       contents: contents(),
       tag_ids: [],
-      parent_id: props.card().parent_id,
+      parent_id: props.card.parent_id,
     });
   };
 
-  const computeConnectHandles = (): { dir: Dir; pos: Dimmension }[] => {
+  const computeConnectHandles = (): { dir: string; x: number; y: number }[] => {
     const w = size().x,
       h = size().y;
     const centerX = w / 2,
       centerY = h / 2;
     return [
-      { dir: "n", pos: { x: centerX + pos().x, y: pos().y } },
-      { dir: "s", pos: { x: centerX + pos().x, y: h + pos().y } },
-      { dir: "e", pos: { x: w + pos().x, y: centerY + pos().y } },
-      { dir: "w", pos: { x: pos().x, y: centerY + pos().y } },
+      { dir: "n", x: centerX + pos().x, y: pos().y },
+      { dir: "s", x: centerX + pos().x, y: h + pos().y },
+      { dir: "e", x: w + pos().x, y: centerY + pos().y },
+      { dir: "w", x: pos().x, y: centerY + pos().y },
     ];
   };
 
@@ -143,7 +151,7 @@ export const CardElm = (props: CardProps) => {
         onContextMenu={onContextMenu}
         onMouseEnter={() => {
           setIsHovered(true);
-          props.onHover(props.card());
+          props.onHover(props.card);
         }}
         onMouseLeave={() => {
           setIsHovered(false);
@@ -155,8 +163,8 @@ export const CardElm = (props: CardProps) => {
         }}
         style={{
           position: "absolute",
-          // left: `${pos().x}px`,
-          // top: `${pos().y}px`,
+          left: `${pos().x}px`,
+          top: `${pos().y}px`,
           width: `${size().x}px`,
           height: `${size().y}px`,
         }}
@@ -169,14 +177,11 @@ export const CardElm = (props: CardProps) => {
             <p>
               x:{pos().x}, y:{pos().y}
             </p>
-            <p></p>
             <div class={style({ overflowX: "auto" })}>{<TagInput />}</div>
             <div
               innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
             ></div>
-            <p>
-              {props.card().id} -&gt; {props.card().parent_id}
-            </p>
+            <p>{props.card.id}</p>
           </div>
           {dirs.map((dir) => (
             <div
@@ -185,16 +190,15 @@ export const CardElm = (props: CardProps) => {
               style={getHandleStyle(dir, size())}
             />
           ))}
-          {computeConnectHandles().map(({ dir, pos }) => (
+          {computeConnectHandles().map(({ dir, x, y }) => (
             <div
               class="connect-handle"
               data-dir={dir}
-              onPointerDown={(e) => props.startConnect(e, pos, props.card().id)}
+              onPointerDown={(e) =>
+                props.startConnect(e, { x, y }, props.card.id)
+              }
               onMouseEnter={(e) =>
-                props.onNearestConnector({
-                  dir,
-                  cardId: props.card().id,
-                })
+                props.onNearestConnector({ x, y }, dir, props.card.id)
               }
               style={getConnectHandleStyle(dir, size(), isHovered)}
             />
@@ -209,13 +213,10 @@ export const CardElm = (props: CardProps) => {
   );
 };
 
-const getHandleStyle = (
-  direction: string,
-  size: Dimmension
-): JSX.CSSProperties => {
+const getHandleStyle = (direction: string, size: Dimmension): CSSProperties => {
   const half = 0;
   const handleSize = 10;
-  const cursorMap: Record<Dir8, string> = {
+  const cursorMap: Record<string, string> = {
     n: "ns-resize",
     s: "ns-resize",
     e: "ew-resize",
@@ -225,7 +226,7 @@ const getHandleStyle = (
     nw: "nwse-resize",
     se: "nwse-resize",
   };
-  const styles: Record<string, JSX.CSSProperties> = {
+  const styles: Record<string, CSSProperties> = {
     n: {
       top: `${half}px`,
       left: `${handleSize}px`,
@@ -277,8 +278,9 @@ const getHandleStyle = (
   };
   return {
     position: "absolute",
-    "z-index": 1000,
+    zIndex: 1000,
     cursor: cursorMap[direction],
+    backgroundColor: "#4A90E2",
     width: `${handleSize}px`,
     height: `${handleSize}px`,
     ...styles[direction],
@@ -287,7 +289,7 @@ const getHandleStyle = (
 
 const CONNECT_HANDLE_SIZE = 20;
 const getConnectHandleStyle = (
-  direction: Dir,
+  direction: "n" | "e" | "s" | "w",
   size: Dimmension,
   isHoverd: () => boolean
 ): CSSProperties => {

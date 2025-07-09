@@ -5,51 +5,39 @@ import {
   createMemo,
   createSignal,
   For,
-  from,
   on,
   onMount,
   Setter,
   Show,
 } from "solid-js";
-import { Card, Dir } from "../schema/Card.js";
+import { Card as CardElm } from "../Card/Card.jsx";
+import { Card } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
 import { createCard, getCards } from "../hooks/useCardAPI.js";
 import { useConnector } from "../hooks/useConnector.js";
-import {
-  calcRelaxConnectorCtrls,
-  CardConnectorPointToDimmension,
-  CardConnectorToPath,
-  Connector,
-} from "../Connector/Connector.jsx";
-import {
-  CardConnector,
-  CardConnectorPoint,
-  Path,
-} from "../schema/Connrctor.js";
+import { Connector } from "../Connector/Connector.jsx";
+import { Path } from "../schema/Connrctor.js";
 import { connectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
-import { CardNode, TreeCardContainer } from "../Card/CardNode.jsx";
 
-export interface CardContainerProps {
+export const CardContainer = (props: {
   position: Dimmension;
   cards: Accessor<Card[]>;
   setCards: Setter<Card[]>;
   cardRelations: Accessor<CardRelation[]>;
   setCardRelations: Setter<CardRelation[]>;
-  setEdittingCard: Setter<Card | null>;
-}
-
-export const CardContainer = (props: CardContainerProps) => {
+  setEdittingCard: Setter<Card | undefined>;
+}) => {
   let ref!: HTMLDivElement;
   let containerRef: HTMLDivElement | undefined;
   const tileSize = 2000;
 
   const [scale, setScale] = createSignal<number>(1);
   const [zoomLevel, setZoomLevel] = createSignal<number>(0);
-
+  let beforeDelta = 0;
   const ZOOM = {
     MAX: 5,
     MIN: -5,
@@ -74,114 +62,12 @@ export const CardContainer = (props: CardContainerProps) => {
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
     onUpCallback: async (fromID: Card["id"]) => {
-      const nearestConn = nearestConnector();
-      const connectStartedConn = connectStartedConnector();
-      console.log("onUpCallback", nearestConn);
-
-      if (!nearestConn || !connectStartedConn) return;
-
+      console.log("onUpCallback", nearestConnector());
       const card_parent_id = fromID;
-      const card_child_id = nearestConn.cardId;
-      const connector = {
-        from: connectStartedConn,
-        to: nearestConn,
-        c: {
-          from: connectStartedConn,
-          to: nearestConn,
-        },
-      };
-      connectCards(card_parent_id, card_child_id, connector).then((res) => {
-        props.setCardRelations((prev) => [
-          ...prev,
-          {
-            parent_id: card_parent_id,
-            child_id: card_child_id,
-            connector,
-          },
-        ]);
-        const parentCard = props.cards().find((c) => c.id === card_parent_id);
-        props.setCards((prev) =>
-          prev.map((c) =>
-            c.id === card_child_id
-              ? {
-                  ...c,
-                  parent_id: card_parent_id,
-                  position: {
-                    x: c.position.x - parentCard!.position.x,
-                    y: c.position.y - parentCard!.position.y,
-                  },
-                }
-              : c
-          )
-        );
-      });
+      const card_child_id = nearestConnector().cardId;
+      await connectCards(card_parent_id, card_child_id, connectPath());
     },
   });
-
-  const buildTreeResult = (
-    cards: Card[],
-    connectors: CardRelation[]
-  ): { roots: CardNode[]; nodeMap: Map<number, CardNode> } => {
-    // 1) Map を作成
-    const nodeMap = new Map<number, CardNode>();
-    cards.forEach((card) => {
-      const connector = connectors.find(
-        (c) => c.child_id === card.id
-      )?.connector;
-      nodeMap.set(card.id, {
-        card: () => card,
-        setCard: (updated) => {
-          props.setCards((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c))
-          );
-        },
-        connector: connector ? () => connector : undefined,
-        setConnector: connector
-          ? (newConn) =>
-              props.setCardRelations((prev) =>
-                prev.map((c) =>
-                  c.child_id === card.id ? { ...c, connector: newConn } : c
-                )
-              )
-          : undefined,
-        children: [],
-        position: { x: 0, y: 0 },
-      });
-    });
-
-    // 2) 親子リンクを張って roots を集める
-    const roots: CardNode[] = [];
-    nodeMap.forEach((node) => {
-      const c = node.card();
-      if (c.parent_id == null) {
-        roots.push(node);
-      } else {
-        const parent = nodeMap.get(c.parent_id);
-        if (parent) {
-          parent.children.push(node);
-        } else {
-          roots.push(node);
-        }
-      }
-    });
-
-    // 3) 親子ツリーを再帰して absPosition を計算
-    const annotate = (node: CardNode, parentAbs: Dimmension) => {
-      const rel = node.card().position;
-      const abs = { x: parentAbs.x + rel.x, y: parentAbs.y + rel.y };
-      node.position = abs;
-      node.children.forEach((child) => annotate(child, abs));
-    };
-    roots.forEach((root) => annotate(root, { x: 0, y: 0 }));
-
-    return { roots, nodeMap };
-  };
-
-  const treeData = createMemo(() =>
-    buildTreeResult(props.cards(), props.cardRelations())
-  );
-  const nodes = () => treeData().roots;
-  const nodeMap = () => treeData().nodeMap;
 
   const { onContextMenu, ContextMenu } = useContextMenu([
     { label: "作成", action: () => addCard() },
@@ -189,10 +75,15 @@ export const CardContainer = (props: CardContainerProps) => {
   ]);
 
   const [hoveredCard, setHoveredCard] = createSignal<Card | null>(null);
-  const [connectStartedConnector, setConnectStartedConnector] =
-    createSignal<CardConnectorPoint | null>(null);
-  const [nearestConnector, setNearestConnector] =
-    createSignal<CardConnectorPoint | null>(null);
+  const [connectStartedConnector, setConnectStartedConnector] = createSignal<{
+    pos: Dimmension;
+    dir: string;
+  } | null>(null);
+  const [nearestConnector, setNearestConnector] = createSignal<{
+    pos: Dimmension;
+    dir: string;
+    cardId: Card["id"];
+  } | null>(null);
 
   const currentTile = () => ({
     x: Math.floor((-position().x + window.innerWidth / 2) / scale() / tileSize),
@@ -240,7 +131,7 @@ export const CardContainer = (props: CardContainerProps) => {
                 cards.push(card.id);
                 props.setCards((prev) => [...prev, card]);
               });
-              console.log(res);
+
               setTiles((prev) => ({ ...prev, [key]: cards }));
             })
             .catch(console.error);
@@ -304,16 +195,15 @@ export const CardContainer = (props: CardContainerProps) => {
       card_ids: [],
     };
     console.log(newCard);
-    createCard(newCard).then((res) => {
-      console.log(res);
-      props.setCards((prev) => [...prev, res.data]);
-    });
+    createCard(newCard);
+    props.setCards((prev) => [...prev, newCard]);
   };
 
   const handleScroll = (event: WheelEvent) => {
     event.preventDefault();
 
     const delta = event.deltaY > 0 ? 1 : -1;
+    beforeDelta = delta > 0 ? 1 : -1;
     if (zoomLevel() + delta > ZOOM.MAX || zoomLevel() + delta < ZOOM.MIN)
       return;
 
@@ -322,19 +212,8 @@ export const CardContainer = (props: CardContainerProps) => {
     );
   };
 
-  const addCardRelation = (
-    from: Card["id"],
-    to: Card["id"],
-    connector: CardConnector
-  ) => {
-    props.setCardRelations((prev) => [
-      ...prev,
-      {
-        parent_id: from,
-        child_id: to,
-        connector,
-      },
-    ]);
+  const addCardRelation = (from: Card["id"], to: Card["id"], parh: Path) => {
+    props.setCardRelations((prev) => [...prev, [from, to, parh]]);
   };
 
   const visibleCards = () => {
@@ -355,47 +234,46 @@ export const CardContainer = (props: CardContainerProps) => {
       .filter((c): c is Card => !!c)
   );
 
-  const nowCardConnectPath = (): Path => {
-    const conn = connectStartedConnector();
-    const near = nearestConnector();
-
-    if (!conn) {
-      console.error("connectStartedConnector is null");
-      return;
+  const calcRelaxConnectorCtrls = (
+    connector: {
+      pos: Dimmension;
+      dir: string;
+    },
+    relax: number
+  ) => {
+    switch (connector.dir) {
+      case "n":
+        return {
+          x: connector.pos.x,
+          y: connector.pos.y - relax,
+        };
+      case "s":
+        return {
+          x: connector.pos.x,
+          y: connector.pos.y + relax,
+        };
+      case "e":
+        return {
+          x: connector.pos.x + relax,
+          y: connector.pos.y,
+        };
+      case "w":
+        return {
+          x: connector.pos.x - relax,
+          y: connector.pos.y,
+        };
     }
+  };
 
-    const fromCardNode = nodeMap().get(conn.cardId);
-    const toCardNode = nodeMap().get(near?.cardId ?? 0);
-
-    if (!fromCardNode) {
-      console.error("Card not found");
-      return;
-    }
-
+  const connectPath = (): Path => {
     return {
-      from: CardConnectorPointToDimmension(conn, fromCard),
-      to:
-        near && toCard
-          ? CardConnectorPointToDimmension(near, toCard)
-          : currentLine()!.to,
+      from: connectStartedConnector()?.pos,
+      to: nearestConnector()?.pos || currentLine()!.to,
       c: {
-        from: calcRelaxConnectorCtrls(
-          {
-            pos: CardConnectorPointToDimmension(conn, fromCard),
-            dir: conn.dir,
-          },
-          50
-        ),
-        to:
-          near && toCard
-            ? calcRelaxConnectorCtrls(
-                {
-                  pos: CardConnectorPointToDimmension(near, toCard),
-                  dir: near.dir,
-                },
-                50
-              )
-            : currentLine()!.to,
+        from: calcRelaxConnectorCtrls(connectStartedConnector(), 50),
+        to: nearestConnector()?.pos
+          ? calcRelaxConnectorCtrls(nearestConnector()!, 50)
+          : currentLine()!.to,
       },
     };
   };
@@ -428,30 +306,31 @@ export const CardContainer = (props: CardContainerProps) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={nodes()}>
-            {(root) => (
-              <TreeCardContainer
-                node={() => ({
-                  position: root.position,
-                  card: root.card,
-                  setCard: root.setCard,
-                  children: root.children,
-                  connector: root.connector,
-                  setConnector: root.setConnector,
-                })}
-                scaleFactor={scale}
-                cardContainerUtilProps={{
-                  mousePosition,
-                  fixedMousePosition,
-                  scale,
-                  setCards: props.setCards,
-                  startConnect,
-                  setConnectStartedConnector,
-                  nearestConnector,
-                  setNearestConnector,
-                  setEdittingCard: props.setEdittingCard,
-                  setHoveredCard,
+          <For each={visibleCardData()}>
+            {(card) => (
+              <CardElm
+                mousePosition={fixedMousePosition}
+                card={card}
+                setCard={(updated: Card) =>
+                  props.setCards((prev) =>
+                    prev.map((c) => (c.id === updated.id ? updated : c))
+                  )
+                }
+                startConnect={(e, pos, cardId) => {
+                  startConnect(e, pos, cardId);
+                  setConnectStartedConnector(nearestConnector());
                 }}
+                setEdittingCard={props.setEdittingCard}
+                scaleFactor={scale}
+                onHover={(c) => setHoveredCard(c)}
+                onLeave={() => {
+                  setHoveredCard(null);
+                  setNearestConnector(null);
+                }}
+                onNearestConnector={(pos, dir, cardId) =>
+                  setNearestConnector({ pos, dir, cardId })
+                }
+                onMove={() => {}}
               />
             )}
           </For>
@@ -468,14 +347,10 @@ export const CardContainer = (props: CardContainerProps) => {
             xmlns="http://www.w3.org/2000/svg"
           >
             <For each={props.cardRelations()}>
-              {(item) => (
-                <Connector
-                  path={CardConnectorToPath(item.connector, nodeMap())}
-                />
-              )}
+              {(item) => <Connector path={item.path} />}
             </For>
             <Show when={currentLine() !== null}>
-              <Connector path={nowCardConnectPath()} />
+              <Connector path={connectPath()} />
             </Show>
           </svg>
         </div>
@@ -485,7 +360,7 @@ export const CardContainer = (props: CardContainerProps) => {
           position: "absolute",
           left: 0,
           top: 0,
-          // pointerEvents: "none",
+          pointerEvents: "none",
         })}
       >
         <p>{nowTile()}</p>
@@ -500,14 +375,10 @@ export const CardContainer = (props: CardContainerProps) => {
           ZOOM: {zoomLevel()} SCALE: {scale()}
         </label>
         <p>
-          {connectStartedConnector()?.cardId},{connectStartedConnector()?.dir},
+          {nearestConnector()?.pos.x},{nearestConnector()?.pos.y},
           {nearestConnector()?.dir},{nearestConnector()?.cardId}
         </p>
-        <p>{JSON.stringify(nowCardConnectPath())}</p>
         <p>{currentLine()?.from.x}</p>
-        <button onClick={() => console.log(nodes())}>nodes</button>
-        <button onClick={() => console.log(props.cards())}>cards</button>
-        <button onClick={() => console.log(props.cardRelations())}>conn</button>
       </div>
       <ContextMenu />
     </>

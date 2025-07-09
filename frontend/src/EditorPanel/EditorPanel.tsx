@@ -12,7 +12,7 @@ import {
 import { Card as CardProps } from "../schema/Card.js";
 
 type EditorPanelProps = {
-  card: Accessor<CardProps | undefined>;
+  card: Accessor<CardProps | null>;
   setCard: (card: CardProps) => void;
   onSave: (card: CardProps) => void;
   onCancel: () => void;
