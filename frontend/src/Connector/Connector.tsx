@@ -5,7 +5,7 @@ import {
 } from "../schema/Connrctor.js";
 import { Card, Dir } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
-import { CardNode } from "../Card/CardNode.jsx";
+import { Node } from "../schema/CardNode.js";
 
 export const calcRelaxConnectorCtrls = (
   connector: {
@@ -40,66 +40,63 @@ export const calcRelaxConnectorCtrls = (
 
 export const CardConnectorPointToDimmension = (
   cardConnectorPoint: CardConnectorPoint,
-  cardNode: CardNode
+  cardNode: Node
 ): Dimmension => {
   const {
-    position: { x, y },
     size: { x: w, y: h },
   } = cardNode.card();
-  const abs = cardNode.position;
+  const pos = cardNode.realtimePosition[0]();
 
   switch (cardConnectorPoint.dir) {
     case "n":
-      return { x: abs.x + w / 2, y: abs.y };
+      return { x: pos.x + w / 2, y: pos.y };
     case "s":
-      return { x: abs.x + w / 2, y: abs.y + h };
+      return { x: pos.x + w / 2, y: pos.y + h };
     case "e":
-      return { x: abs.x + w, y: abs.y + h / 2 };
+      return { x: pos.x + w, y: pos.y + h / 2 };
     case "w":
-      return { x: abs.x, y: abs.y + h / 2 };
+      return { x: pos.x, y: pos.y + h / 2 };
   }
 };
 
 export const CardConnectorToPath = (
   connector: CardConnector,
-  nodeMap: Map<number, CardNode>
+  parentCardNode: Node,
+  childCardNode: Node
 ): Path => {
-  const fromCardNode = nodeMap.get(connector.from.cardId);
-  const toCardNode = nodeMap.get(connector.to.cardId);
-
-  if (fromCardNode === undefined || toCardNode === undefined) {
-    throw new Error("Connector.tsx Card not found");
+  if (parentCardNode === undefined || childCardNode === undefined) {
+    throw new Error("Connector:: Card not found");
   }
 
   return {
-    from: CardConnectorPointToDimmension(connector.from, fromCardNode),
-    to: CardConnectorPointToDimmension(connector.to, toCardNode),
+    parent: CardConnectorPointToDimmension(connector.parent, parentCardNode),
+    child: CardConnectorPointToDimmension(connector.child, childCardNode),
     c: {
-      from: calcRelaxConnectorCtrls(
+      parent: calcRelaxConnectorCtrls(
         {
           pos: CardConnectorPointToDimmension(
             {
-              ...connector.c.from,
-              cardId: connector.from.cardId,
-              dir: connector.from.dir,
+              ...connector.c.parent,
+              cardId: connector.parent.cardId,
+              dir: connector.parent.dir,
             },
-            fromCardNode
+            parentCardNode
           ),
-          dir: connector.from.dir,
+          dir: connector.parent.dir,
         },
         50
       ),
-      to: calcRelaxConnectorCtrls(
+      child: calcRelaxConnectorCtrls(
         {
           pos: CardConnectorPointToDimmension(
             {
-              ...connector.c.to,
-              cardId: connector.to.cardId,
-              dir: connector.to.dir,
+              ...connector.c.child,
+              cardId: connector.child.cardId,
+              dir: connector.child.dir,
             },
-            toCardNode
+            childCardNode
           ),
-          dir: connector.to.dir,
+          dir: connector.child.dir,
         },
         50
       ),
@@ -108,12 +105,12 @@ export const CardConnectorToPath = (
   };
 };
 
-export const Connector = (props: { path: Path }) => {
+export const PathElm = (props: { path: Path }) => {
   const pointsString = (props.path.c.points ?? [])
     .map(({ c, p }) => `S${p.x} ${p.y},${c.x} ${c.y}`)
     .join(",");
   const pathString = () =>
-    `M${props.path.from.x} ${props.path.from.y} C${props.path.c.from.x} ${props.path.c.from.y}, ${props.path.c.to.x} ${props.path.c.to.y}, ${props.path.to.x} ${props.path.to.y}`;
+    `M${props.path.parent.x} ${props.path.parent.y} C${props.path.c.parent.x} ${props.path.c.parent.y}, ${props.path.c.child.x} ${props.path.c.child.y}, ${props.path.child.x} ${props.path.child.y}`;
 
   return <path d={pathString()} stroke="black" fill="none" />;
 };

@@ -21,9 +21,11 @@ pub async fn fetch_all_card_rows<'e, E>(executor: E) -> Result<Vec<CardRow>, sql
 where
     E: Executor<'e, Database = MySql>,
 {
-    sqlx::query_as::<_, CardRow>(SELECT_CARD_ROWS)
-        .fetch_all(executor)
-        .await
+    let sql = format!(
+        "{} GROUP BY c.id, c.title, c.contents, c.created_at, c.updated_at, pos_x, pos_y, size_x, size_y",
+        SELECT_CARD_ROWS
+    );
+    sqlx::query_as::<_, CardRow>(&sql).fetch_all(executor).await
 }
 
 // 範囲クエリ（MBRIntersects + GROUP BY）

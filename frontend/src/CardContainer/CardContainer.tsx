@@ -16,22 +16,19 @@ import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
-import { createCard, getCards } from "../hooks/useCardAPI.js";
+import { createCard, getCards, updateCard } from "../hooks/useCardAPI.js";
+import { deleteCard as deleteCardAPI } from "../hooks/useCardAPI.js";
 import { useConnector } from "../hooks/useConnector.js";
-import {
-  calcRelaxConnectorCtrls,
-  CardConnectorPointToDimmension,
-  CardConnectorToPath,
-  Connector,
-} from "../Connector/Connector.jsx";
+import { calcRelaxConnectorCtrls, PathElm } from "../Connector/Connector.jsx";
 import {
   CardConnector,
   CardConnectorPoint,
   Path,
 } from "../schema/Connrctor.js";
-import { connectCards } from "../hooks/useConnectAPI.js";
+import { connectCards, disconnectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
-import { CardNode, TreeCardContainer } from "../Card/CardNode.jsx";
+import { CardElm } from "../Card/Card.jsx";
+import { getAbsPosFromMap } from "../utils/position.js";
 
 export interface CardContainerProps {
   position: Dimmension;
@@ -71,117 +68,68 @@ export const CardContainer = (props: CardContainerProps) => {
   });
   const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
+
+  // Compute a quick id->card map for lookups
+  const cardMap = () => new Map(props.cards().map((c) => [c.id, c] as const));
+
+  // Live absolute position registry for each card (for following + connectors)
+  const posGetters = new Map<number, Accessor<Dimmension>>();
+  const posSetters = new Map<number, Setter<Dimmension>>();
+  const lastDragDelta = new Map<number, Dimmension>();
+
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
     onUpCallback: async (fromID: Card["id"]) => {
-      const nearestConn = nearestConnector();
-      const connectStartedConn = connectStartedConnector();
-      console.log("onUpCallback", nearestConn);
+      const parentConnPoint = nearestConnector();
+      const childConnPoint = connectStartedConnector();
+      console.log("onUpCallback", parentConnPoint);
 
-      if (!nearestConn || !connectStartedConn) return;
+      if (!parentConnPoint || !childConnPoint) return;
 
-      const card_parent_id = fromID;
-      const card_child_id = nearestConn.cardId;
-      const connector = {
-        from: connectStartedConn,
-        to: nearestConn,
+      const parentId = parentConnPoint.cardId;
+      const childId = fromID;
+      const childCard = cardMap().get(childId);
+      if (!childCard) return;
+      const connector: CardConnector = {
+        parent: parentConnPoint,
+        child: childConnPoint,
         c: {
-          from: connectStartedConn,
-          to: nearestConn,
+          parent: parentConnPoint,
+          child: childConnPoint,
         },
       };
-      connectCards(card_parent_id, card_child_id, connector).then((res) => {
+
+      connectCards(parentId, childId, connector).then((res) => {
         props.setCardRelations((prev) => [
           ...prev,
           {
-            parent_id: card_parent_id,
-            child_id: card_child_id,
+            parent_id: parentId,
+            child_id: childId,
             connector,
           },
         ]);
-        const parentCard = props.cards().find((c) => c.id === card_parent_id);
+
+        const parentAbs = getAbsPos(parentId);
+        const childAbs = getAbsPos(childId);
+        const newChildCard: Card = {
+          ...childCard,
+          parent_id: parentId,
+          position: {
+            x: childAbs.x - parentAbs.x,
+            y: childAbs.y - parentAbs.y,
+          },
+        };
         props.setCards((prev) =>
-          prev.map((c) =>
-            c.id === card_child_id
-              ? {
-                  ...c,
-                  parent_id: card_parent_id,
-                  position: {
-                    x: c.position.x - parentCard!.position.x,
-                    y: c.position.y - parentCard!.position.y,
-                  },
-                }
-              : c
-          )
+          prev.map((c) => (c.id === childId ? newChildCard : c))
         );
+        // Keep DB's absolute shape unchanged on relation change
+        updateCard({ ...childCard, position: childAbs });
+        // Clear temp connector states
+        setConnectStartedConnector(null);
+        setNearestConnector(null);
       });
     },
   });
-
-  const buildTreeResult = (
-    cards: Card[],
-    connectors: CardRelation[]
-  ): { roots: CardNode[]; nodeMap: Map<number, CardNode> } => {
-    // 1) Map を作成
-    const nodeMap = new Map<number, CardNode>();
-    cards.forEach((card) => {
-      const connector = connectors.find(
-        (c) => c.child_id === card.id
-      )?.connector;
-      nodeMap.set(card.id, {
-        card: () => card,
-        setCard: (updated) => {
-          props.setCards((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c))
-          );
-        },
-        connector: connector ? () => connector : undefined,
-        setConnector: connector
-          ? (newConn) =>
-              props.setCardRelations((prev) =>
-                prev.map((c) =>
-                  c.child_id === card.id ? { ...c, connector: newConn } : c
-                )
-              )
-          : undefined,
-        children: [],
-        position: { x: 0, y: 0 },
-      });
-    });
-
-    // 2) 親子リンクを張って roots を集める
-    const roots: CardNode[] = [];
-    nodeMap.forEach((node) => {
-      const c = node.card();
-      if (c.parent_id == null) {
-        roots.push(node);
-      } else {
-        const parent = nodeMap.get(c.parent_id);
-        if (parent) {
-          parent.children.push(node);
-        } else {
-          roots.push(node);
-        }
-      }
-    });
-
-    // 3) 親子ツリーを再帰して absPosition を計算
-    const annotate = (node: CardNode, parentAbs: Dimmension) => {
-      const rel = node.card().position;
-      const abs = { x: parentAbs.x + rel.x, y: parentAbs.y + rel.y };
-      node.position = abs;
-      node.children.forEach((child) => annotate(child, abs));
-    };
-    roots.forEach((root) => annotate(root, { x: 0, y: 0 }));
-
-    return { roots, nodeMap };
-  };
-
-  const treeData = createMemo(() =>
-    buildTreeResult(props.cards(), props.cardRelations())
-  );
-  const nodes = () => treeData().roots;
-  const nodeMap = () => treeData().nodeMap;
 
   const { onContextMenu, ContextMenu } = useContextMenu([
     { label: "作成", action: () => addCard() },
@@ -210,44 +158,42 @@ export const CardContainer = (props: CardContainerProps) => {
   );
 
   // nowTile が変わったら周囲 3×3 をフェッチ＆古いものをクリア
-  createEffect(
-    on(nowTile, () => {
-      const [cx, cy] = nowTile().split(",").map(Number);
-      const needed = new Set<string>();
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          needed.add(`${cx + dx},${cy + dy}`);
-        }
-      }
-
-      // 足りないタイルだけフェッチ
-      needed.forEach((key) => {
-        if (!(key in tiles())) {
-          const [tx, ty] = key.split(",").map(Number);
-          const minX = tx * tileSize;
-          const minY = ty * tileSize;
-          const maxX = minX + tileSize;
-          const maxY = minY + tileSize;
-
-          fetch(
-            `http://localhost:8082/cards/in_range?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
-          )
-            .then((r) => r.json() as Promise<Card[]>)
-            .then((res) => {
-              const cards: number[] = [];
-              res.data.forEach((card) => {
-                if (props.cards().some((c) => c.id === card.id)) return;
-                cards.push(card.id);
-                props.setCards((prev) => [...prev, card]);
-              });
-              console.log(res);
-              setTiles((prev) => ({ ...prev, [key]: cards }));
-            })
-            .catch(console.error);
-        }
-      });
-    })
-  );
+  // createEffect(
+  //   on(nowTile, () => {
+  // const [cx, cy] = nowTile().split(",").map(Number);
+  // const needed = new Set<string>();
+  // for (let dx = -1; dx <= 1; dx++) {
+  //   for (let dy = -1; dy <= 1; dy++) {
+  //     needed.add(`${cx + dx},${cy + dy}`);
+  //   }
+  // }
+  // // 足りないタイルだけフェッチ
+  // needed.forEach((key) => {
+  //   if (!(key in tiles())) {
+  //     const [tx, ty] = key.split(",").map(Number);
+  //     const minX = tx * tileSize;
+  //     const minY = ty * tileSize;
+  //     const maxX = minX + tileSize;
+  //     const maxY = minY + tileSize;
+  //     fetch(
+  //       `http://localhost:8082/cards/in_range?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
+  //     )
+  //       .then((r) => r.json() as Promise<Card[]>)
+  //       .then((res) => {
+  //         const cards: number[] = [];
+  //         res.data.forEach((card) => {
+  //           if (props.cards().some((c) => c.id === card.id)) return;
+  //           cards.push(card.id);
+  //           props.setCards((prev) => [...prev, card]);
+  //         });
+  //         console.log(res);
+  //         setTiles((prev) => ({ ...prev, [key]: cards }));
+  //       })
+  //       .catch(console.error);
+  //   }
+  // });
+  //   })
+  // );
 
   createEffect(
     on(
@@ -282,7 +228,6 @@ export const CardContainer = (props: CardContainerProps) => {
       ref,
       getPos: position,
       setPos: setPosition,
-      mousePosition: mousePosition,
       scaleFactor: () => 1,
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
@@ -295,19 +240,25 @@ export const CardContainer = (props: CardContainerProps) => {
         y: fixedMousePosition().y,
       },
       size: {
-        x: 100,
-        y: 100,
+        x: 200,
+        y: 200,
       },
       title: "",
       contents: "",
       tag_ids: [],
-      card_ids: [],
     };
     console.log(newCard);
-    createCard(newCard).then((res) => {
-      console.log(res);
-      props.setCards((prev) => [...prev, res.data]);
-    });
+    createCard(newCard)
+      .then((created) => {
+        // Append created card immediately
+        props.setCards((prev) => [...prev, created]);
+        // Register live position for connectors immediately
+        // If maps exist, seed with absolute position
+        const abs = created.position; // parent_id is null => absolute
+        const setter = posSetters.get(created.id);
+        if (setter) setter(abs);
+      })
+      .catch(console.error);
   };
 
   const handleScroll = (event: WheelEvent) => {
@@ -349,13 +300,57 @@ export const CardContainer = (props: CardContainerProps) => {
     return neededKeys.flatMap((key) => tiles()[key] ?? []);
   };
 
-  const visibleCardData = createMemo(() =>
-    visibleCards() // number[]
-      .map((id) => props.cards().find((c) => c.id === id))
-      .filter((c): c is Card => !!c)
-  );
+  const getAbsPos = (id: number): Dimmension => getAbsPosFromMap(cardMap(), id);
 
-  const nowCardConnectPath = (): Path => {
+  // Collect all descendant ids (children, grandchildren, ...)
+  const getDescendants = (rootId: number): number[] => {
+    const out: number[] = [];
+    const stack: number[] = [rootId];
+    const cards = props.cards();
+    while (stack.length) {
+      const cur = stack.pop()!;
+      const children = cards.filter((c) => c.parent_id === cur).map((c) => c.id);
+      for (const ch of children) {
+        out.push(ch);
+        stack.push(ch);
+      }
+    }
+    return out;
+  };
+
+  const moveDescendants = (rootId: number, delta: Dimmension) => {
+    if (!delta || (delta.x === 0 && delta.y === 0)) return;
+    const targets = getDescendants(rootId);
+    for (const id of targets) {
+      const set = posSetters.get(id);
+      if (!set) continue;
+      set((prev) => ({ x: prev.x + delta.x, y: prev.y + delta.y }));
+    }
+  };
+
+  const connectorPointToPos = (
+    point: CardConnectorPoint
+  ): Dimmension | undefined => {
+    const card = cardMap().get(point.cardId);
+    if (!card) return undefined;
+    // Prefer live absolute position if available (reactive during drag)
+    const live = posGetters.get(point.cardId)?.();
+    const abs = live ?? getAbsPos(point.cardId);
+    const w = card.size.x;
+    const h = card.size.y;
+    switch (point.dir) {
+      case "n":
+        return { x: abs.x + w / 2, y: abs.y };
+      case "s":
+        return { x: abs.x + w / 2, y: abs.y + h };
+      case "e":
+        return { x: abs.x + w, y: abs.y + h / 2 };
+      case "w":
+        return { x: abs.x, y: abs.y + h / 2 };
+    }
+  };
+
+  const nowCardConnectPath = (): Path | undefined => {
     const conn = connectStartedConnector();
     const near = nearestConnector();
 
@@ -364,38 +359,32 @@ export const CardContainer = (props: CardContainerProps) => {
       return;
     }
 
-    const fromCardNode = nodeMap().get(conn.cardId);
-    const toCardNode = nodeMap().get(near?.cardId ?? 0);
+    const childCard = cardMap().get(conn.cardId);
+    const parentCard = near ? cardMap().get(near.cardId) : undefined;
 
-    if (!fromCardNode) {
+    if (!childCard) {
       console.error("Card not found");
       return;
     }
 
+    const childPos = connectorPointToPos(conn);
+    if (!childPos) return undefined;
+    const fallbackTo = currentLine()?.to ?? fixedMousePosition();
+    const parentPos = (() => {
+      if (near && parentCard) {
+        return connectorPointToPos(near) ?? fallbackTo;
+      }
+      return fallbackTo;
+    })();
+
     return {
-      from: CardConnectorPointToDimmension(conn, fromCard),
-      to:
-        near && toCard
-          ? CardConnectorPointToDimmension(near, toCard)
-          : currentLine()!.to,
+      child: childPos,
+      parent: parentPos,
       c: {
-        from: calcRelaxConnectorCtrls(
-          {
-            pos: CardConnectorPointToDimmension(conn, fromCard),
-            dir: conn.dir,
-          },
-          50
-        ),
-        to:
-          near && toCard
-            ? calcRelaxConnectorCtrls(
-                {
-                  pos: CardConnectorPointToDimmension(near, toCard),
-                  dir: near.dir,
-                },
-                50
-              )
-            : currentLine()!.to,
+        child: calcRelaxConnectorCtrls({ pos: childPos, dir: conn.dir }, 50),
+        parent: near && parentCard
+          ? calcRelaxConnectorCtrls({ pos: parentPos, dir: near.dir }, 50)
+          : fallbackTo,
       },
     };
   };
@@ -403,6 +392,7 @@ export const CardContainer = (props: CardContainerProps) => {
   return (
     <>
       <StyledCardContainer
+        id="card-container"
         ref={ref}
         on:wheel={handleScroll}
         on:mousemove={(e) => {
@@ -420,6 +410,7 @@ export const CardContainer = (props: CardContainerProps) => {
         data-card-container
       >
         <div
+          id="card-container-inner"
           ref={(el) => (containerRef = el!)}
           style={{
             position: "absolute",
@@ -428,32 +419,135 @@ export const CardContainer = (props: CardContainerProps) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={nodes()}>
-            {(root) => (
-              <TreeCardContainer
-                node={() => ({
-                  position: root.position,
-                  card: root.card,
-                  setCard: root.setCard,
-                  children: root.children,
-                  connector: root.connector,
-                  setConnector: root.setConnector,
-                })}
-                scaleFactor={scale}
-                cardContainerUtilProps={{
-                  mousePosition,
-                  fixedMousePosition,
-                  scale,
-                  setCards: props.setCards,
-                  startConnect,
-                  setConnectStartedConnector,
-                  nearestConnector,
-                  setNearestConnector,
-                  setEdittingCard: props.setEdittingCard,
-                  setHoveredCard,
-                }}
-              />
-            )}
+          <For each={props.cards()}>
+            {(card) => {
+              const id = card.id;
+              const cardAcc = () => props.cards().find((c) => c.id === id)!;
+              // Use absolute position for display, but convert to relative when saving
+              const [position, setPosition] = createSignal<Dimmension>({ ...getAbsPos(id) });
+              // Register for live lookup
+              posGetters.set(id, position);
+              posSetters.set(id, setPosition);
+              const parentAbs = () => (cardAcc().parent_id ? getAbsPos(cardAcc().parent_id!) : { x: 0, y: 0 });
+              const cardPosition = () => ({ x: position().x - parentAbs().x, y: position().y - parentAbs().y });
+
+              return (
+                <div
+                  style={{ position: "absolute", left: `${position().x}px`, top: `${position().y}px` }}
+                >
+                  <CardElm
+                    card={cardAcc}
+                    mousePosition={mousePosition}
+                    setNodePosition={setPosition}
+                    nodePosition={position}
+                    cardPosition={cardPosition}
+                    setCard={(newCard) => {
+                      // Ensure stored position remains relative to parent
+                      const parentAbs = newCard.parent_id ? getAbsPos(newCard.parent_id) : { x: 0, y: 0 };
+                      const relative = {
+                        x: newCard.position.x - parentAbs.x,
+                        y: newCard.position.y - parentAbs.y,
+                      };
+                      const patched = { ...newCard, position: relative };
+                      props.setCards((prev) => prev.map((c) => (c.id === id ? patched : c)));
+                    }}
+                    startConnect={(e, pos, cardId, dir) => {
+                      startConnect(e, pos, cardId);
+                      // Remember the child's starting connector point (the handle used)
+                      setConnectStartedConnector({ cardId, dir });
+                    }}
+                    setEdittingCard={props.setEdittingCard}
+                    scaleFactor={scale}
+                    onHover={(card) => setHoveredCard(card)}
+                    onLeave={() => {
+                      setHoveredCard(null);
+                      setNearestConnector(null);
+                    }}
+                    onNearestConnector={(p) => setNearestConnector(p)}
+                    onMove={(diff) => {
+                      // diff is delta from drag-start; convert to incremental
+                      const prev = lastDragDelta.get(id) ?? { x: 0, y: 0 };
+                      const inc = { x: diff.x - prev.x, y: diff.y - prev.y };
+                      lastDragDelta.set(id, diff);
+                      moveDescendants(id, inc);
+                    }}
+                    onUpdateCard={(updated) => {
+                      // Clear tracking since drag ends
+                      lastDragDelta.delete(id);
+                      // Convert absolute drop position to relative for in-memory state
+                      const parentAbs = updated.parent_id ? getAbsPos(updated.parent_id) : { x: 0, y: 0 };
+                      const relative = {
+                        x: updated.position.x - parentAbs.x,
+                        y: updated.position.y - parentAbs.y,
+                      };
+                      const patched = { ...updated, position: relative };
+                      props.setCards((prev) => prev.map((c) => (c.id === id ? patched : c)));
+                      // Persist absolute to DB to keep shape correct
+                      updateCard({ ...updated, position: { ...updated.position } });
+                    }}
+                    onDelete={async (deleteId) => {
+                      // Capture card and relevant positions before mutating state
+                      const doomed = cardAcc();
+                      const doomedAbs = getAbsPos(deleteId);
+                      // Gather relations to remove in DB (both parent and child sides)
+                      const rels = props
+                        .cardRelations()
+                        .filter((r) => r.parent_id === deleteId || r.child_id === deleteId);
+                      // Detach direct children: set parent_id null and keep absolute position
+                      const children = props.cards().filter((c) => c.parent_id === deleteId);
+                      const patchedChildren = children.map((ch) => {
+                        const abs = getAbsPos(ch.id);
+                        return { ...ch, parent_id: undefined, position: abs } as Card;
+                      });
+                      // Update state: remove card, patch children, remove relations
+                      props.setCards((prev) => {
+                        const removed = prev.filter((c) => c.id !== deleteId);
+                        // Apply children patches
+                        return removed.map((c) => {
+                          const patched = patchedChildren.find((p) => p.id === c.id);
+                          return patched ? patched : c;
+                        });
+                      });
+                      props.setCardRelations((prev) =>
+                        prev.filter((r) => r.parent_id !== deleteId && r.child_id !== deleteId)
+                      );
+                      // Clean live registries
+                      posGetters.delete(deleteId);
+                      posSetters.delete(deleteId);
+                      lastDragDelta.delete(deleteId);
+                      // Persist: disconnect all related edges first to satisfy FK, then delete card.
+                      try {
+                        await Promise.all(
+                          rels.map((r) => disconnectCards(r.parent_id, r.child_id))
+                        );
+                        await deleteCardAPI(doomed);
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                    onDisconnectFromParent={async (childId) => {
+                      const child = cardAcc();
+                      if (child.parent_id == null) return;
+                      const parentId = child.parent_id;
+                      // Compute absolute to preserve on screen
+                      const abs = getAbsPos(childId);
+                      const patched: Card = { ...child, parent_id: undefined, position: abs };
+                      props.setCards((prev) => prev.map((c) => (c.id === childId ? patched : c)));
+                      props.setCardRelations((prev) =>
+                        prev.filter((r) => !(r.parent_id === parentId && r.child_id === childId))
+                      );
+                      try {
+                        await disconnectCards(parentId, childId);
+                        // DB shape should already be absolute; keep it by updating with abs
+                        await updateCard({ ...child, position: abs });
+                      } catch (e) {
+                        console.error(e);
+                      }
+                    }}
+                  />
+                </div>
+              );
+            }}
           </For>
           <svg
             class={style({
@@ -468,14 +562,29 @@ export const CardContainer = (props: CardContainerProps) => {
             xmlns="http://www.w3.org/2000/svg"
           >
             <For each={props.cardRelations()}>
-              {(item) => (
-                <Connector
-                  path={CardConnectorToPath(item.connector, nodeMap())}
-                />
-              )}
+              {(rel) => {
+                if (!rel.connector) return null;
+                const parentPos = () => connectorPointToPos(rel.connector!.parent);
+                const childPos = () => connectorPointToPos(rel.connector!.child);
+                return (
+                  <Show when={parentPos() && childPos()}>
+                    <PathElm
+                      path={{
+                        parent: parentPos()!,
+                        child: childPos()!,
+                        c: {
+                          parent: calcRelaxConnectorCtrls({ pos: parentPos()!, dir: rel.connector.parent.dir }, 50),
+                          child: calcRelaxConnectorCtrls({ pos: childPos()!, dir: rel.connector.child.dir }, 50),
+                          points: rel.connector.c.points,
+                        },
+                      }}
+                    />
+                  </Show>
+                );
+              }}
             </For>
             <Show when={currentLine() !== null}>
-              <Connector path={nowCardConnectPath()} />
+              {nowCardConnectPath() && <PathElm path={nowCardConnectPath()!} />}
             </Show>
           </svg>
         </div>
@@ -495,6 +604,9 @@ export const CardContainer = (props: CardContainerProps) => {
         <p>
           {mousePosition().x},{mousePosition().y}
         </p>
+        <p>
+          {fixedMousePosition().x},{fixedMousePosition().y}
+        </p>
         <input type="range" min={ZOOM.MIN} max={ZOOM.MAX} value={zoomLevel()} />
         <label>
           ZOOM: {zoomLevel()} SCALE: {scale()}
@@ -505,7 +617,7 @@ export const CardContainer = (props: CardContainerProps) => {
         </p>
         <p>{JSON.stringify(nowCardConnectPath())}</p>
         <p>{currentLine()?.from.x}</p>
-        <button onClick={() => console.log(nodes())}>nodes</button>
+        
         <button onClick={() => console.log(props.cards())}>cards</button>
         <button onClick={() => console.log(props.cardRelations())}>conn</button>
       </div>

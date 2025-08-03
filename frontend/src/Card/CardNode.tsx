@@ -6,6 +6,8 @@ import {
   onMount,
   For,
   Setter,
+  createEffect,
+  on,
 } from "solid-js";
 import { CardElm, CardProps } from "./Card.jsx";
 import { useDrag } from "../hooks/useDrag.js";
@@ -17,28 +19,23 @@ import {
   Path,
 } from "../schema/Connrctor.js";
 import { CardContainerProps } from "../CardContainer/CardContainer.jsx";
+import { Node } from "../schema/CardNode.js";
+import { CardConnectorElm } from "./CardConnector.jsx";
+import { style } from "@macaron-css/core";
+import { Portal } from "solid-js/web";
 
-export type CardNode = {
-  position: Dimmension;
-  card: Accessor<Card>;
-  setCard: (card: Card) => void;
-  connector?: Accessor<CardConnector>;
-  setConnector?: (path: CardConnector) => void;
-  children: CardNode[];
-};
-
-interface TreeCardProps {
-  node: Accessor<CardNode>;
+interface CardNodeElmProps {
+  node: Node;
   scaleFactor: Accessor<number>;
 }
 
-export const TreeCardContainer: Component<
-  TreeCardProps & {
+export const CardNodeElm: Component<
+  CardNodeElmProps & {
     cardContainerUtilProps: {
+      nodeMap: Accessor<Map<Card["id"], Node>>;
       mousePosition: Accessor<Dimmension>;
       fixedMousePosition: Accessor<Dimmension>;
       scale: Accessor<number>;
-      setCards: Setter<Card[]>;
       startConnect: (e: PointerEvent, pos: Dimmension, cardId: number) => void;
       setConnectStartedConnector: Setter<CardConnectorPoint | null>;
       nearestConnector: Accessor<CardConnectorPoint | null>;
@@ -48,30 +45,52 @@ export const TreeCardContainer: Component<
     };
   }
 > = (props) => {
-  // 自身の相対座標
-  const [position, setPosition] = createSignal<Dimmension>({
-    x: props.node().card().position.x,
-    y: props.node().card().position.y,
+  const [position, setPosition] = createSignal<Dimmension>(
+    props.node.position()
+  );
+
+  const cardPosition = createMemo(() => {
+    const abs = props.cardContainerUtilProps
+      .nodeMap()
+      .get(props.node.parentId());
+    return {
+      x: position().x - (abs ? abs.position().x : 0),
+      y: position().y - (abs ? abs.position().y : 0),
+    };
   });
 
-  onMount(() => {
-    console.log("TreeCardContainer onMount");
-  });
+  createEffect(
+    on(position, (position: Dimmension) => {
+      props.node.realtimePosition[1](position);
+    })
+  );
+
+  createEffect(
+    on(props.node.realtimePosition[0], (position: Dimmension) => {
+      props.node.children.forEach((child: Node) => {
+        child.realtimePosition[1]({
+          x: position.x + child.card().position.x,
+          y: position.y + child.card().position.y,
+        });
+      });
+    })
+  );
 
   return (
     <div
       style={{
         position: "absolute",
-        left: `${position().x}px`,
-        top: `${position().y}px`,
+        left: `${cardPosition().x}px`,
+        top: `${cardPosition().y}px`,
       }}
     >
-      {/* 実際のカード表示 */}
       <CardElm
-        card={props.node().card}
-        absPosition={[position, setPosition]}
+        card={props.node.card()}
         mousePosition={props.cardContainerUtilProps.mousePosition}
-        setCard={props.node().setCard}
+        setNodePosition={setPosition}
+        nodePosition={position}
+        cardPosition={cardPosition}
+        setCard={props.node.setCard}
         startConnect={(e, pos, cardId) => {
           props.cardContainerUtilProps.startConnect(e, pos, cardId);
           props.cardContainerUtilProps.setConnectStartedConnector(
@@ -89,23 +108,43 @@ export const TreeCardContainer: Component<
           props.cardContainerUtilProps.setNearestConnector(cardConnectorPoint)
         }
         onMove={(diff) => {
-          const beforeConnector = props.node()?.connector();
-          const setConnector = props.node().setConnector;
-          console.log(beforeConnector, setConnector);
-          // setConnector && setConnector(beforeConnector);
+          // setPosition(diff);
         }}
       />
-
-      {/* 子ノードを再帰レンダリング */}
-      <For each={props.node().children}>
+      <For each={props.node.children}>
         {(child) => (
-          <TreeCardContainer
-            node={() => child}
+          <CardNodeElm
+            node={child}
             scaleFactor={props.scaleFactor}
             cardContainerUtilProps={props.cardContainerUtilProps}
           />
         )}
       </For>
+      {/* <Portal mount={document.querySelector("#card-container-inner")}>
+        <svg
+          class={style({
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: "100vw",
+            height: "100vh",
+            pointerEvents: "none",
+            overflow: "visible",
+          })}
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <For each={props.node.children}>
+            {(childNode) =>
+              childNode.connector ? (
+                <CardConnectorElm
+                  childCardNode={childNode}
+                  parentCardNode={props.node}
+                />
+              ) : null
+            }
+          </For>
+        </svg>
+      </Portal> */}
     </div>
   );
 };

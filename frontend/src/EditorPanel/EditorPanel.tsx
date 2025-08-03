@@ -57,7 +57,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
   return (
     <StyledPanel open={isOpen()}>
       <h2>カードを編集{props.card()?.contents}</h2>
-      <label>
+      {/* <label>
         タイトル
         <input
           type="text"
@@ -71,7 +71,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
           }}
           style={{ width: "100%", "margin-bottom": "1rem" }}
         />
-      </label>
+      </label> */}
       <label>
         コンテンツ (Markdown)
         <textarea

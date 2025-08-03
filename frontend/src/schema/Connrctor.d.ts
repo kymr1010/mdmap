@@ -2,11 +2,11 @@ import { Dimmension } from "./Point.js";
 import { Card, Dir } from "./Card.js";
 
 export interface Path {
-  from: Dimmension;
-  to: Dimmension;
+  parent: Dimmension;
+  child: Dimmension;
   c: {
-    from: Dimmension;
-    to: Dimmension;
+    parent: Dimmension;
+    child: Dimmension;
     points?: Array<{
       p: Dimmension;
       c: Dimmension;
@@ -20,11 +20,11 @@ export interface CardConnectorPoint {
 }
 
 export interface CardConnector {
-  from: CardConnectorPoint;
-  to: CardConnectorPoint;
+  parent: CardConnectorPoint;
+  child: CardConnectorPoint;
   c: {
-    from: CardConnectorPoint;
-    to: CardConnectorPoint;
+    parent: CardConnectorPoint;
+    child: CardConnectorPoint;
     points?: Array<{
       p: Dimmension;
       c: Dimmension;

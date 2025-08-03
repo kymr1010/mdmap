@@ -9,8 +9,7 @@ export function useDrag(props: {
   getPos: () => Dimmension;
   setPos: (pos: Dimmension) => void;
   scaleFactor: () => number;
-  mousePosition: Accessor<Dimmension>;
-  moveCallback?: (diff: Dimmension) => void;
+  moveCallback?: (pos: Dimmension) => void;
   upCallback?: (diff: Dimmension) => void;
 }) {
   // タッチデバイスでの既定の “パン” を無効化
@@ -45,26 +44,34 @@ export function useDrag(props: {
   };
 
   const onPointerMove = (e: PointerEvent) => {
-    // origin を引いた位置をセット
-    props.setPos({
+    // 計算済みの新しい位置（origin を差し引く）
+    const next = {
       x: Math.floor(e.clientX / props.scaleFactor() - origin.x),
       y: Math.floor(e.clientY / props.scaleFactor() - origin.y),
-    });
+    };
+    // 要素位置を更新
+    props.setPos(next);
+    // ドラッグ開始からの差分（クリック位置補正後）
     if (props.moveCallback !== undefined)
       props.moveCallback({
-        x: Math.floor(e.clientX / props.scaleFactor() - beforePos.x),
-        y: Math.floor(e.clientY / props.scaleFactor() - beforePos.y),
+        x: next.x - beforePos.x,
+        y: next.y - beforePos.y,
       });
   };
 
   const onPointerUp = (e: PointerEvent) => {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
-    if (props.upCallback !== undefined)
+    if (props.upCallback !== undefined) {
+      const next = {
+        x: Math.floor(e.clientX / props.scaleFactor() - origin.x),
+        y: Math.floor(e.clientY / props.scaleFactor() - origin.y),
+      };
       props.upCallback({
-        x: Math.floor(e.clientX / props.scaleFactor() - beforePos.x),
-        y: Math.floor(e.clientY / props.scaleFactor() - beforePos.y),
+        x: next.x - beforePos.x,
+        y: next.y - beforePos.y,
       });
+    }
     props.ref.releasePointerCapture(e.pointerId);
   };
 

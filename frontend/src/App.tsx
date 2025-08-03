@@ -1,12 +1,20 @@
-import { createSignal, onMount } from "solid-js";
+import { createSignal, For, onMount } from "solid-js";
 // import init from "@memo-app/wasm";
 import { CardContainer } from "./CardContainer/CardContainer.jsx";
 import { globalStyle } from "@macaron-css/core";
 import { EditorPanel } from "./EditorPanel/EditorPanel.jsx";
 import { Card } from "./schema/Card.js";
-import { updateCard } from "./hooks/useCardAPI.js";
+import { getCards, updateCard } from "./hooks/useCardAPI.js";
+import {
+  normalizeCardsToRelative,
+  getAbsPos,
+  buildCardMap,
+  getAbsPosFromMap,
+} from "./utils/position.js";
 import { getCardRelations } from "./hooks/useConnectAPI.js";
 import { CardRelation } from "./schema/CardRelation.js";
+// import { DataCheck } from "./DataCheck/DataCheck.jsx";
+import { Tree } from "./Tree/Tree.jsx";
 
 globalStyle("body", {
   "--color-bg": "#fff",
@@ -32,12 +40,15 @@ function App() {
   const [cards, setCards] = createSignal<Card[]>([]);
   const [cardRelations, setCardRelations] = createSignal<CardRelation[]>([]);
 
+  // NodeTree removed for simplicity; render from cards directly
+
   onMount(async () => {
     const res = await fetch("http://localhost:8082/");
     const text = await res.text();
     const rels = await getCardRelations();
-    console.log(rels);
+    const fetched = await getCards();
     setCardRelations(rels);
+    setCards(normalizeCardsToRelative(fetched));
     console.log(cardRelations());
     console.log(text); // "Hello, World! 🎉"
     // init();
@@ -54,10 +65,11 @@ function App() {
       }}
     >
       <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
       <CardContainer
         position={{ x: 0, y: 0 }}
-        setCards={setCards}
         cards={cards}
+        setCards={setCards}
         cardRelations={cardRelations}
         setCardRelations={setCardRelations}
         setEdittingCard={setEdittingCard}
@@ -74,11 +86,14 @@ function App() {
           });
         }}
         onSave={(card) => {
-          if (!card) updateCard(card);
+          // Persist edits to DB using absolute position
+          const abs = getAbsPosFromMap(buildCardMap(cards()), card.id);
+          updateCard({ ...card, position: abs });
           setEdittingCard(null);
         }}
         onCancel={() => setEdittingCard(null)}
       />
+      {/* <Tree nodes={nodeTree} /> */}
     </div>
   );
 }

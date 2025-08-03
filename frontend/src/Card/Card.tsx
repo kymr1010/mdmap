@@ -1,7 +1,7 @@
-// src/components/Card.tsx
 import {
   Accessor,
   createEffect,
+  createMemo,
   createSignal,
   For,
   JSX,
@@ -22,26 +22,35 @@ import { Portal } from "solid-js/web";
 import { updateCard } from "../hooks/useCardAPI.js";
 import { EditorPanel } from "../EditorPanel/EditorPanel.jsx";
 import { TagInput } from "../Tag/Tag.jsx";
-import { CardConnectorPoint } from "../schema/Connrctor.js";
+import { CardConnector, CardConnectorPoint } from "../schema/Connrctor.js";
 
 export interface CardProps {
   mousePosition: Accessor<Dimmension>;
+  nodePosition: Accessor<Dimmension>;
+  setNodePosition: Setter<Dimmension>;
+  cardPosition: Accessor<Dimmension>;
   card: Accessor<Card>;
-  absPosition: [Accessor<Dimmension>, Setter<Dimmension>];
   setCard: (card: Card) => void;
   scaleFactor: Accessor<number>;
   setEdittingCard: Setter<Card | null>;
-  startConnect: (e: PointerEvent, pos: Dimmension, cardId: number) => void;
+  startConnect: (
+    e: PointerEvent,
+    pos: Dimmension,
+    cardId: number,
+    dir: Dir
+  ) => void;
   onHover: (c: Card) => void;
   onLeave: () => void;
   onNearestConnector: (cardConnectorPoint: CardConnectorPoint) => void;
   onMove: (pos: Dimmension) => void;
+  onUpdateCard?: (card: Card) => void;
+  onDelete?: (id: number) => void;
+  onDisconnectFromParent?: (id: number) => void;
 }
 
 export const CardElm = (props: CardProps) => {
   let ref!: HTMLDivElement;
 
-  const [pos, setPos] = props.absPosition;
   const [size, setSize] = createSignal<Dimmension>({ ...props.card().size });
   const [title, setTitle] = createSignal(props.card().title);
   const [tags, setTags] = createSignal(props.card().tag_ids);
@@ -58,7 +67,18 @@ export const CardElm = (props: CardProps) => {
         props.setEdittingCard(props.card());
       },
     },
-    { label: "削除", action: () => console.log("削除しました") },
+    ...(props.card().parent_id != null
+      ? [
+          {
+            label: "接続解除",
+            action: () => props.onDisconnectFromParent?.(props.card().id),
+          } as MenuItem,
+        ]
+      : []),
+    {
+      label: "削除",
+      action: () => props.onDelete?.(props.card().id),
+    },
   ];
   const { onContextMenu, ContextMenu } = useContextMenu(menuItems);
   const dirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
@@ -68,54 +88,57 @@ export const CardElm = (props: CardProps) => {
   onMount(() => {
     useDrag({
       ref,
-      getPos: pos,
-      setPos: setPos,
+      getPos: props.nodePosition,
+      setPos: props.setNodePosition,
       scaleFactor: props.scaleFactor,
-      mousePosition: props.mousePosition,
       moveCallback: props.onMove,
       upCallback: (diff: Dimmension) => {
-        console.log(props.card());
         const newCard = {
           ...props.card(),
-          position: pos(),
+          // send absolute to container; it will convert to relative
+          position: props.nodePosition(),
         };
-        props.setCard(newCard);
-        updateCard(newCard);
+        if (props.onUpdateCard) {
+          props.onUpdateCard(newCard);
+        } else {
+          // fallback: persist as-is
+          updateCard(newCard);
+        }
       },
     });
     dirs.forEach((dir) =>
       useResize(
         handles[dir],
         dir,
-        pos,
-        setPos,
+        props.nodePosition,
+        props.setNodePosition,
         size,
         setSize,
         props.scaleFactor,
-        () => {
-          const newCard = {
-            id: props.card().id,
-            position: pos(),
+        (diff: Dimmension) => {
+          const newCard: Card = {
+            ...props.card(),
+            // send absolute to container; it will convert to relative
+            position: props.nodePosition(),
             size: size(),
-            title: title(),
-            contents: contents(),
-            tag_ids: tags(),
-            card_ids: [],
           };
-          props.setCard(newCard);
-          updateCard(newCard);
+          if (props.onUpdateCard) {
+            props.onUpdateCard(newCard);
+          } else {
+            updateCard(newCard);
+          }
         }
       )
     );
   });
 
-  createEffect(() => setPos({ ...props.card().position }));
+  // createEffect(() => setPosition({ ...props.card().position }));
   createEffect(() => setSize({ ...props.card().size }));
 
   const handleSaveCard = () => {
     updateCard({
       id: props.card().id,
-      position: pos(),
+      position: position(),
       size: size(),
       title: title(),
       contents: contents(),
@@ -130,10 +153,28 @@ export const CardElm = (props: CardProps) => {
     const centerX = w / 2,
       centerY = h / 2;
     return [
-      { dir: "n", pos: { x: centerX + pos().x, y: pos().y } },
-      { dir: "s", pos: { x: centerX + pos().x, y: h + pos().y } },
-      { dir: "e", pos: { x: w + pos().x, y: centerY + pos().y } },
-      { dir: "w", pos: { x: pos().x, y: centerY + pos().y } },
+      {
+        dir: "n",
+        pos: { x: centerX + props.cardPosition().x, y: props.cardPosition().y },
+      },
+      {
+        dir: "s",
+        pos: {
+          x: centerX + props.cardPosition().x,
+          y: h + props.cardPosition().y,
+        },
+      },
+      {
+        dir: "e",
+        pos: {
+          x: w + props.cardPosition().x,
+          y: centerY + props.cardPosition().y,
+        },
+      },
+      {
+        dir: "w",
+        pos: { x: props.cardPosition().x, y: centerY + props.cardPosition().y },
+      },
     ];
   };
 
@@ -155,6 +196,7 @@ export const CardElm = (props: CardProps) => {
         }}
         style={{
           position: "absolute",
+          // Node の位置によって決まるのでここでは指定不要
           // left: `${pos().x}px`,
           // top: `${pos().y}px`,
           width: `${size().x}px`,
@@ -166,17 +208,15 @@ export const CardElm = (props: CardProps) => {
         <StyledCardContent>
           <div>
             <h1>{title()}</h1>
-            <p>
-              x:{pos().x}, y:{pos().y}
+            {/* <p>
+              x:{props.nodePosition().x}, y:{props.nodePosition().y}
             </p>
-            <p></p>
-            <div class={style({ overflowX: "auto" })}>{<TagInput />}</div>
+            <p>
+              x:{props.cardPosition().x}, y:{props.cardPosition().y}
+            </p> */}
             <div
               innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
             ></div>
-            <p>
-              {props.card().id} -&gt; {props.card().parent_id}
-            </p>
           </div>
           {dirs.map((dir) => (
             <div
@@ -189,8 +229,10 @@ export const CardElm = (props: CardProps) => {
             <div
               class="connect-handle"
               data-dir={dir}
-              onPointerDown={(e) => props.startConnect(e, pos, props.card().id)}
-              onMouseEnter={(e) =>
+              onPointerDown={(e) =>
+                props.startConnect(e, pos, props.card().id, dir)
+              }
+              onMouseEnter={() =>
                 props.onNearestConnector({
                   dir,
                   cardId: props.card().id,
@@ -200,6 +242,12 @@ export const CardElm = (props: CardProps) => {
             />
           ))}
         </StyledCardContent>
+        <StyledCardFooter>
+          <p> {props.card().id} -&gt; {props.card().parent_id}</p>
+          <p>{props.card().created_at}</p>
+          <p>{props.card().updated_at}</p>
+          <div class={style({ overflowX: "auto" })}>{<TagInput />}</div>
+        </StyledCardFooter>
       </StyledCard>
 
       <Portal>
@@ -290,19 +338,19 @@ const getConnectHandleStyle = (
   direction: Dir,
   size: Dimmension,
   isHoverd: () => boolean
-): CSSProperties => {
+): JSX.CSSProperties => {
   const half = CONNECT_HANDLE_SIZE / 2;
   const centerX = size.x / 2 - half;
   const centerY = size.y / 2 - half;
 
-  const base: CSSProperties = {
+  const base: JSX.CSSProperties = {
     position: "absolute",
     display: isHoverd() ? "block" : "none",
     width: `${CONNECT_HANDLE_SIZE}px`,
     height: `${CONNECT_HANDLE_SIZE}px`,
     "border-radius": `${CONNECT_HANDLE_SIZE / 2}px`,
     cursor: "crosshair",
-    zIndex: 1000,
+    "z-index": 1001,
     background: "#888",
   };
 
@@ -367,6 +415,13 @@ const StyledCardHeader = styled("div", {
   base: {
     width: "100%",
     height: "1rem",
+  },
+});
+
+const StyledCardFooter = styled("div", {
+  base: {
+    width: "100%",
+    marginTop: "auto",
   },
 });
 
