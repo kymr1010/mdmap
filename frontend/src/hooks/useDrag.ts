@@ -9,8 +9,7 @@ export function useDrag(props: {
   getPos: () => Dimmension;
   setPos: (pos: Dimmension) => void;
   scaleFactor: () => number;
-  mousePosition: Accessor<Dimmension>;
-  moveCallback?: (diff: Dimmension) => void;
+  moveCallback?: (pos: Dimmension) => void;
   upCallback?: (diff: Dimmension) => void;
 }) {
   // タッチデバイスでの既定の “パン” を無効化

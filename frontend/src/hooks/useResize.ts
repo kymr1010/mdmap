@@ -12,7 +12,7 @@ export function useResize(
   getSize: () => Dimmension,
   setSize: (s: Dimmension) => void,
   getScale: () => number,
-  callback: () => void
+  onUpCallback: (diff: Dimmension) => void
 ) {
   const minSize = { x: 20, y: 20 };
   let originMouse: { x: number; y: number };
@@ -60,8 +60,9 @@ export function useResize(
   function onPointerUp(e: PointerEvent) {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
-
-    callback();
+    const dx = (e.clientX - originMouse.x) / getScale();
+    const dy = (e.clientY - originMouse.y) / getScale();
+    onUpCallback({ x: dx, y: dy });
     handleEl.releasePointerCapture(e.pointerId);
   }
 

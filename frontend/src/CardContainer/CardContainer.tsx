@@ -16,13 +16,13 @@ import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
-import { createCard, getCards } from "../hooks/useCardAPI.js";
+import { createCard, getCards, updateCard } from "../hooks/useCardAPI.js";
 import { useConnector } from "../hooks/useConnector.js";
 import {
   calcRelaxConnectorCtrls,
   CardConnectorPointToDimmension,
   CardConnectorToPath,
-  Connector,
+  PathElm,
 } from "../Connector/Connector.jsx";
 import {
   CardConnector,
@@ -31,14 +31,14 @@ import {
 } from "../schema/Connrctor.js";
 import { connectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
-import { CardNode, TreeCardContainer } from "../Card/CardNode.jsx";
+import { CardNodeElm } from "../Card/CardNode.jsx";
+import { CardConnectorElm } from "../Card/CardConnector.jsx";
+import { Node, NodeMap } from "../schema/CardNode.js";
 
 export interface CardContainerProps {
   position: Dimmension;
-  cards: Accessor<Card[]>;
-  setCards: Setter<Card[]>;
-  cardRelations: Accessor<CardRelation[]>;
-  setCardRelations: Setter<CardRelation[]>;
+  nodeTree: Accessor<Node[]>;
+  nodeMap: Accessor<NodeMap>;
   setEdittingCard: Setter<Card | null>;
 }
 
@@ -71,117 +71,61 @@ export const CardContainer = (props: CardContainerProps) => {
   });
   const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
+
+  const [connector, setConnector] = createSignal<CardConnector[]>(
+    Array.from(props.nodeMap().values()).flatMap((n) =>
+      n.connector ? [n.connector()] : []
+    )
+  );
+
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
     onUpCallback: async (fromID: Card["id"]) => {
-      const nearestConn = nearestConnector();
-      const connectStartedConn = connectStartedConnector();
-      console.log("onUpCallback", nearestConn);
+      const parentConnPoint = nearestConnector();
+      const childConnPoint = connectStartedConnector();
+      console.log("onUpCallback", parentConnPoint);
 
-      if (!nearestConn || !connectStartedConn) return;
+      if (!parentConnPoint || !childConnPoint) return;
 
-      const card_parent_id = fromID;
-      const card_child_id = nearestConn.cardId;
-      const connector = {
-        from: connectStartedConn,
-        to: nearestConn,
+      const parentId = parentConnPoint.cardId;
+      const childId = fromID;
+      const childCard = props.nodeMap().get(childId)?.card();
+      if (!childCard) return;
+      const connector: CardConnector = {
+        parent: parentConnPoint,
+        child: childConnPoint,
         c: {
-          from: connectStartedConn,
-          to: nearestConn,
+          parent: parentConnPoint,
+          child: childConnPoint,
         },
       };
-      connectCards(card_parent_id, card_child_id, connector).then((res) => {
+
+      connectCards(parentId, childId, connector).then((res) => {
         props.setCardRelations((prev) => [
           ...prev,
           {
-            parent_id: card_parent_id,
-            child_id: card_child_id,
+            parent_id: parentId,
+            child_id: childId,
             connector,
           },
         ]);
-        const parentCard = props.cards().find((c) => c.id === card_parent_id);
+
+        const parentNode = props.nodeMap().get(parentId);
+        const newChildCard: Card = {
+          ...childCard,
+          parent_id: parentId,
+          position: {
+            x: childCard.position.x - parentNode?.position?.x,
+            y: childCard.position.y - parentNode?.position?.y,
+          },
+        };
         props.setCards((prev) =>
-          prev.map((c) =>
-            c.id === card_child_id
-              ? {
-                  ...c,
-                  parent_id: card_parent_id,
-                  position: {
-                    x: c.position.x - parentCard!.position.x,
-                    y: c.position.y - parentCard!.position.y,
-                  },
-                }
-              : c
-          )
+          prev.map((c) => (c.id === childId ? newChildCard : c))
         );
+        updateCard(newChildCard);
       });
     },
   });
-
-  const buildTreeResult = (
-    cards: Card[],
-    connectors: CardRelation[]
-  ): { roots: CardNode[]; nodeMap: Map<number, CardNode> } => {
-    // 1) Map を作成
-    const nodeMap = new Map<number, CardNode>();
-    cards.forEach((card) => {
-      const connector = connectors.find(
-        (c) => c.child_id === card.id
-      )?.connector;
-      nodeMap.set(card.id, {
-        card: () => card,
-        setCard: (updated) => {
-          props.setCards((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c))
-          );
-        },
-        connector: connector ? () => connector : undefined,
-        setConnector: connector
-          ? (newConn) =>
-              props.setCardRelations((prev) =>
-                prev.map((c) =>
-                  c.child_id === card.id ? { ...c, connector: newConn } : c
-                )
-              )
-          : undefined,
-        children: [],
-        position: { x: 0, y: 0 },
-      });
-    });
-
-    // 2) 親子リンクを張って roots を集める
-    const roots: CardNode[] = [];
-    nodeMap.forEach((node) => {
-      const c = node.card();
-      if (c.parent_id == null) {
-        roots.push(node);
-      } else {
-        const parent = nodeMap.get(c.parent_id);
-        if (parent) {
-          parent.children.push(node);
-        } else {
-          roots.push(node);
-        }
-      }
-    });
-
-    // 3) 親子ツリーを再帰して absPosition を計算
-    const annotate = (node: CardNode, parentAbs: Dimmension) => {
-      const rel = node.card().position;
-      const abs = { x: parentAbs.x + rel.x, y: parentAbs.y + rel.y };
-      node.position = abs;
-      node.children.forEach((child) => annotate(child, abs));
-    };
-    roots.forEach((root) => annotate(root, { x: 0, y: 0 }));
-
-    return { roots, nodeMap };
-  };
-
-  const treeData = createMemo(() =>
-    buildTreeResult(props.cards(), props.cardRelations())
-  );
-  const nodes = () => treeData().roots;
-  const nodeMap = () => treeData().nodeMap;
 
   const { onContextMenu, ContextMenu } = useContextMenu([
     { label: "作成", action: () => addCard() },
@@ -210,44 +154,42 @@ export const CardContainer = (props: CardContainerProps) => {
   );
 
   // nowTile が変わったら周囲 3×3 をフェッチ＆古いものをクリア
-  createEffect(
-    on(nowTile, () => {
-      const [cx, cy] = nowTile().split(",").map(Number);
-      const needed = new Set<string>();
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          needed.add(`${cx + dx},${cy + dy}`);
-        }
-      }
-
-      // 足りないタイルだけフェッチ
-      needed.forEach((key) => {
-        if (!(key in tiles())) {
-          const [tx, ty] = key.split(",").map(Number);
-          const minX = tx * tileSize;
-          const minY = ty * tileSize;
-          const maxX = minX + tileSize;
-          const maxY = minY + tileSize;
-
-          fetch(
-            `http://localhost:8082/cards/in_range?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
-          )
-            .then((r) => r.json() as Promise<Card[]>)
-            .then((res) => {
-              const cards: number[] = [];
-              res.data.forEach((card) => {
-                if (props.cards().some((c) => c.id === card.id)) return;
-                cards.push(card.id);
-                props.setCards((prev) => [...prev, card]);
-              });
-              console.log(res);
-              setTiles((prev) => ({ ...prev, [key]: cards }));
-            })
-            .catch(console.error);
-        }
-      });
-    })
-  );
+  // createEffect(
+  //   on(nowTile, () => {
+  // const [cx, cy] = nowTile().split(",").map(Number);
+  // const needed = new Set<string>();
+  // for (let dx = -1; dx <= 1; dx++) {
+  //   for (let dy = -1; dy <= 1; dy++) {
+  //     needed.add(`${cx + dx},${cy + dy}`);
+  //   }
+  // }
+  // // 足りないタイルだけフェッチ
+  // needed.forEach((key) => {
+  //   if (!(key in tiles())) {
+  //     const [tx, ty] = key.split(",").map(Number);
+  //     const minX = tx * tileSize;
+  //     const minY = ty * tileSize;
+  //     const maxX = minX + tileSize;
+  //     const maxY = minY + tileSize;
+  //     fetch(
+  //       `http://localhost:8082/cards/in_range?min_x=${minX}&min_y=${minY}&max_x=${maxX}&max_y=${maxY}`
+  //     )
+  //       .then((r) => r.json() as Promise<Card[]>)
+  //       .then((res) => {
+  //         const cards: number[] = [];
+  //         res.data.forEach((card) => {
+  //           if (props.cards().some((c) => c.id === card.id)) return;
+  //           cards.push(card.id);
+  //           props.setCards((prev) => [...prev, card]);
+  //         });
+  //         console.log(res);
+  //         setTiles((prev) => ({ ...prev, [key]: cards }));
+  //       })
+  //       .catch(console.error);
+  //   }
+  // });
+  //   })
+  // );
 
   createEffect(
     on(
@@ -282,7 +224,6 @@ export const CardContainer = (props: CardContainerProps) => {
       ref,
       getPos: position,
       setPos: setPosition,
-      mousePosition: mousePosition,
       scaleFactor: () => 1,
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
@@ -349,12 +290,6 @@ export const CardContainer = (props: CardContainerProps) => {
     return neededKeys.flatMap((key) => tiles()[key] ?? []);
   };
 
-  const visibleCardData = createMemo(() =>
-    visibleCards() // number[]
-      .map((id) => props.cards().find((c) => c.id === id))
-      .filter((c): c is Card => !!c)
-  );
-
   const nowCardConnectPath = (): Path => {
     const conn = connectStartedConnector();
     const near = nearestConnector();
@@ -364,33 +299,33 @@ export const CardContainer = (props: CardContainerProps) => {
       return;
     }
 
-    const fromCardNode = nodeMap().get(conn.cardId);
-    const toCardNode = nodeMap().get(near?.cardId ?? 0);
+    const childCardNode = props.nodeMap().get(conn.cardId);
+    const parentCardNode = props.nodeMap().get(near?.cardId ?? 0);
 
-    if (!fromCardNode) {
+    if (!childCardNode) {
       console.error("Card not found");
       return;
     }
 
     return {
-      from: CardConnectorPointToDimmension(conn, fromCard),
-      to:
-        near && toCard
-          ? CardConnectorPointToDimmension(near, toCard)
+      child: CardConnectorPointToDimmension(conn, childCardNode),
+      parent:
+        near && parentCardNode
+          ? CardConnectorPointToDimmension(near, parentCardNode)
           : currentLine()!.to,
       c: {
-        from: calcRelaxConnectorCtrls(
+        child: calcRelaxConnectorCtrls(
           {
-            pos: CardConnectorPointToDimmension(conn, fromCard),
+            pos: CardConnectorPointToDimmension(conn, childCardNode),
             dir: conn.dir,
           },
           50
         ),
-        to:
-          near && toCard
+        parent:
+          near && parentCardNode
             ? calcRelaxConnectorCtrls(
                 {
-                  pos: CardConnectorPointToDimmension(near, toCard),
+                  pos: CardConnectorPointToDimmension(near, parentCardNode),
                   dir: near.dir,
                 },
                 50
@@ -403,6 +338,7 @@ export const CardContainer = (props: CardContainerProps) => {
   return (
     <>
       <StyledCardContainer
+        id="card-container"
         ref={ref}
         on:wheel={handleScroll}
         on:mousemove={(e) => {
@@ -420,6 +356,7 @@ export const CardContainer = (props: CardContainerProps) => {
         data-card-container
       >
         <div
+          id="card-container-inner"
           ref={(el) => (containerRef = el!)}
           style={{
             position: "absolute",
@@ -428,23 +365,16 @@ export const CardContainer = (props: CardContainerProps) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={nodes()}>
+          <For each={props.nodeTree()}>
             {(root) => (
-              <TreeCardContainer
-                node={() => ({
-                  position: root.position,
-                  card: root.card,
-                  setCard: root.setCard,
-                  children: root.children,
-                  connector: root.connector,
-                  setConnector: root.setConnector,
-                })}
+              <CardNodeElm
+                node={root}
                 scaleFactor={scale}
                 cardContainerUtilProps={{
                   mousePosition,
                   fixedMousePosition,
+                  nodeMap: props.nodeMap,
                   scale,
-                  setCards: props.setCards,
                   startConnect,
                   setConnectStartedConnector,
                   nearestConnector,
@@ -467,15 +397,22 @@ export const CardContainer = (props: CardContainerProps) => {
             })}
             xmlns="http://www.w3.org/2000/svg"
           >
-            <For each={props.cardRelations()}>
-              {(item) => (
-                <Connector
-                  path={CardConnectorToPath(item.connector, nodeMap())}
-                />
-              )}
+            <For each={Array.from(props.nodeMap().values())}>
+              {(item) =>
+                item.connector ? (
+                  <CardConnectorElm
+                    childCardNode={props
+                      .nodeMap()
+                      .get(item.connector().child.cardId)}
+                    parentCardNode={props
+                      .nodeMap()
+                      .get(item.connector().parent.cardId)}
+                  />
+                ) : null
+              }
             </For>
             <Show when={currentLine() !== null}>
-              <Connector path={nowCardConnectPath()} />
+              <PathElm path={nowCardConnectPath()} />
             </Show>
           </svg>
         </div>
@@ -495,6 +432,9 @@ export const CardContainer = (props: CardContainerProps) => {
         <p>
           {mousePosition().x},{mousePosition().y}
         </p>
+        <p>
+          {fixedMousePosition().x},{fixedMousePosition().y}
+        </p>
         <input type="range" min={ZOOM.MIN} max={ZOOM.MAX} value={zoomLevel()} />
         <label>
           ZOOM: {zoomLevel()} SCALE: {scale()}
@@ -505,7 +445,23 @@ export const CardContainer = (props: CardContainerProps) => {
         </p>
         <p>{JSON.stringify(nowCardConnectPath())}</p>
         <p>{currentLine()?.from.x}</p>
-        <button onClick={() => console.log(nodes())}>nodes</button>
+        <button onClick={() => console.log(props.nodeTree())}>nodes</button>
+        <button
+          onClick={() => console.log(Array.from(props.nodeMap().values()))}
+        >
+          nodeMap
+        </button>
+        <button
+          onClick={() =>
+            Array.from(props.nodeMap().values()).map((n) =>
+              console.log(
+                n.connector && props.nodeMap().get(n.connector().parent.cardId)
+              )
+            )
+          }
+        >
+          nodeMap
+        </button>
         <button onClick={() => console.log(props.cards())}>cards</button>
         <button onClick={() => console.log(props.cardRelations())}>conn</button>
       </div>

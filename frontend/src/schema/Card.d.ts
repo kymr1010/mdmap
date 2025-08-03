@@ -8,6 +8,8 @@ export interface Card {
   contents: string;
   parent_id?: Card["id"];
   tag_ids: number[];
+  created_at: string;
+  updated_at: string;
 }
 
 export type Dir = "n" | "s" | "e" | "w";

@@ -1,158 +1,144 @@
-diff --git a/backend/src/handlers/cards.rs b/backend/src/handlers/cards.rs
-index c1de352..62c4112 100644
---- a/backend/src/handlers/cards.rs
-+++ b/backend/src/handlers/cards.rs
-@@ -175,12 +175,15 @@ pub async fn update_card(
-             StatusCode::ACCEPTED,
-             Json(json!({"code": StatusCode::ACCEPTED.to_string(), "message":"Success"})),
-         ),
--        Err(e) => (
--            StatusCode::INTERNAL_SERVER_ERROR,
--            Json(
--                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
-+        Err(e) => {
-+            println!("Error updating card: {}", e);
-+            (
-+                StatusCode::INTERNAL_SERVER_ERROR,
-+                Json(
-+                    json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
-+                ),
-             ),
--        ),
-+        }
-     }
+diff --git a/backend/src/handlers/card_card.rs b/backend/src/handlers/card_card.rs
+index f9f5237..21ea06f 100644
+--- a/backend/src/handlers/card_card.rs
++++ b/backend/src/handlers/card_card.rs
+@@ -1,20 +1,29 @@
+-use crate::models::CardCardRow;
++use crate::models::{CardCardRow, CardRelation};
+ use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
+ use serde_json::json;
+ use sqlx::Pool;
+ 
+ pub async fn get_connectors(
+     Extension(pool): Extension<Pool<sqlx::MySql>>,
+-) -> Json<Vec<CardCardRow>> {
+-    let rows = sqlx::query_as::<_, CardCardRow>(
+-        r#"
+-      SELECT card_parent_id, card_child_id, id, path
+-      FROM card_card
+-    "#,
+-    )
++) -> Json<Vec<CardRelation>> {
++    let rows = sqlx::query_as::<_, CardCardRow>(r#"
++      SELECT c.card_parent_id, c.card_child_id, c.id, c.path
++      FROM card_card c
++    "#)
+     .fetch_all(&pool)
+     .await
+     .unwrap_or_default();
++
++    let connectors: Vec<CardRelation> = rows
++        .into_iter()
++        .map(|r| CardCardRow {
++            card_parent_id: r.card_parent_id,
++            card_child_id: r.card_child_id,
++            id: r.id,
++        })
++        .collect();
++
++    Json(connectors)
  }
  
-diff --git a/backend/src/main.rs b/backend/src/main.rs
-index 2181813..0a19563 100644
---- a/backend/src/main.rs
-+++ b/backend/src/main.rs
-@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
+ pub async fn connect_card_to_card(
+diff --git a/backend/src/models.rs b/backend/src/models.rs
+index 7c7ad83..76b318f 100644
+--- a/backend/src/models.rs
++++ b/backend/src/models.rs
+@@ -5,4 +5,4 @@ mod tag;
+ pub use tag::{Tag, TagRow};
  
-     // ルーター組み立て
-     let app = routes::router()
--        .layer(ServiceBuilder::new().layer(cors))
-+        .layer(cors)
-         .layer(Extension(pool));
- 
-     // サーバ起動
-diff --git a/docker-compose.yml b/docker-compose.yml
-index 473c904..b694141 100644
---- a/docker-compose.yml
-+++ b/docker-compose.yml
-@@ -8,8 +8,8 @@ services:
-     ports:
-       - "5173:5173"
-     volumes:
--      - .:/app
--
-+      - ./frontend:/app
-+      - /app/node_modules
-   backend:
-     build:
-       context: ./backend
-@@ -22,6 +22,8 @@ services:
-     environment:
-       DB_HOST: mariadb
-       DB_PORT: 3308
-+    command: >
-+      sh -c "cargo sqlx migrate run && cargo run"
-     volumes:
-       - ./backend:/app
-       - cargo-target:/app/target
-diff --git a/frontend/Dockerfile.frontend b/frontend/Dockerfile.frontend
-index 61efa13..8c183c3 100644
---- a/frontend/Dockerfile.frontend
-+++ b/frontend/Dockerfile.frontend
-@@ -1,41 +1,31 @@
--FROM node:lts-alpine AS base
-+FROM node:lts-bullseye AS base
- 
- WORKDIR /app
- 
--# Rust環境セットアップ
--RUN apk update && apk add curl build-base
-+RUN apt-get update && apt-get install -y curl build-essential
- RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
- ENV PATH="/root/.cargo/bin:${PATH}"
- 
--RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-+RUN cargo install wasm-pack --version 0.12.1
-+RUN cargo install wasm-bindgen-cli
- 
--# pnpmインストール
- RUN npm install -g pnpm
- 
--# package.jsonとworkspace設定をコピー
- COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
--
--# 依存関係をfetchしてキャッシュ
- RUN pnpm fetch
- 
--# wasmビルドとコピー
--COPY wasm /tmp/wasm
--RUN cd /tmp/wasm && wasm-pack build --target web --scope memo-app
-+COPY wasm ./wasm
-+RUN cd wasm && wasm-pack build --target web --scope memo-app
+ mod card_card;
+-pub use card_card::CardCardRow;
++pub use card_card::{CardCardRow, CardRelation};
+diff --git a/backend/src/models/card_card.rs b/backend/src/models/card_card.rs
+index 07027c8..cfad1a7 100644
+--- a/backend/src/models/card_card.rs
++++ b/backend/src/models/card_card.rs
+@@ -7,3 +7,11 @@ pub struct CardCardRow {
+     pub card_child_id: i64,
+     pub path: String,
+ }
 +
- RUN mkdir -p /app/packages/wasm
--RUN cp -r /tmp/wasm/pkg/* /app/packages/wasm/
-+RUN cp -r ./wasm/pkg/* /app/packages/wasm/
- 
--# frontendをコピー
- COPY frontend ./frontend
--
--# 作業ディレクトリを frontend に変更して install
- RUN pnpm install --offline --shamefully-hoist
- 
- WORKDIR /app/frontend
--# ビルド
- RUN pnpm run build
- 
- RUN ls /app/node_modules -lan
- 
--# 起動コマンド
--CMD ["pnpm", "run", "dev", "--host"]
--
-+CMD ["pnpm", "run", "dev", "--host"]
++#[derive(Serialize, Deserialize)]
++pub struct CardRelation {
++    pub card_parent_id: i64,
++    pub card_child_id: i64,
++    pub id: i64,
++    pub path: String,
++}
 \ No newline at end of file
-diff --git a/frontend/src/Card/Card.tsx b/frontend/src/Card/Card.tsx
-index 29ac43a..623f1af 100644
---- a/frontend/src/Card/Card.tsx
-+++ b/frontend/src/Card/Card.tsx
-@@ -76,6 +76,8 @@ export const Card = (props: {
-       size: size(),
-       title: title(),
-       contents: contents(),
-+      tag_ids: [],
-+      card_ids: [],
-     });
-   };
+diff --git a/mml/elic b/mml/elic
+index 50018d5..7b1651b 100644
+--- a/mml/elic
++++ b/mml/elic
+@@ -1,35 +1,40 @@
+ SoundType={soundfont}
+ Tempo=77
+ 調＃（ドファ）
++PlayFrom(22:0:0)
  
-diff --git a/frontend/src/hooks/useCardAPI.ts b/frontend/src/hooks/useCardAPI.ts
-index cf7f392..076a015 100644
---- a/frontend/src/hooks/useCardAPI.ts
-+++ b/frontend/src/hooks/useCardAPI.ts
-@@ -24,6 +24,7 @@ export const createCard = async (card: Card) => {
- };
+-TR=01 CH=01 @5
+-o6
++TR=01 CH=01 @1 o6
+ r1. r1.
  
- export const updateCard = async (card: Card) => {
-+  console.log("Updating card: %o", JSON.stringify(card));
-   await fetchAPI("card", {
-     method: "PATCH",
-     headers: {
-diff --git a/wasm/Cargo.toml b/wasm/Cargo.toml
-index d90e5cd..b979733 100644
---- a/wasm/Cargo.toml
-+++ b/wasm/Cargo.toml
-@@ -22,4 +22,7 @@ web-sys = { version = "0.3", features = [
-     "console",
-     "EventTarget",
-     "MouseEvent"
--]}
-\ No newline at end of file
-+]}
+-r fagfc<b>cd<a2.
++rfa gfc <b>cd <a2.
+ f1.> r1.
+ 
+-r fagfc<b>cd<a2.>
+-c2. f2.<e1.
++rfa gfc <b>cd <a2.>
++c2. f2. <e1.
+ 
+-r2. ab>c-ed<b>dc-<b>
+-d2. r2 d
++r2. ab>c- ed<b >dc-<b>
++d2. r2d g2. f2.
+ 
+-TR=02 CH=01
+-o4
+-r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
++<bab> cde cde <f<d>g
++r1.
+ 
+-r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+-r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
++TR=02 CH=01 o5 v70
++r'bdf'2 r 'acf'2 r'bdf'2 r'acf'2
+ 
+-r 'bdf'2 r 'acf'2 r 'bdf'2 r 'acf'2
+-r 'acf'2 r 'bdf'2 r 'gab'2 r 'bdg'2
++r'bdf'2 r'acf'2 r'bdf'2 r'acf'2
++r'bdf'2 r'acf'2 r'bdf'2 r'acf'2
+ 
+-r '<f->ad'2 r 'ac-e'2 r 'gbe'2 r '<d>gbe'2
+-r '<c-f>a'2 r '<c->ga'2
++r'bdf'2 r'acf'2 r'bdf'2 r'acf'2
++r'acf'2 r'bdf'2 r'gab'2 r'bdg'2
+ 
+-TR=03 CH=01 
+-o3 
++r'<f->ad'2 r'ac-e'2 r'gbe'2 r'<d>gbe'2
++r'<c-f>a'2 r'<c->ga'2 r'<b>eg'2 r'<a>cf'2
 +
-+[package.metadata.wasm-pack.profile.release]
-+wasm-opt = false
++r'<b>eg'2 r'cfa'2 r'<a>cfa'2 r'<<b>>a''<<e>b>d'
++
++'c-ea>c-'2. '<dfa>d'2.
++
++TR=03 CH=01 o3 
+ g2. d2. g2. d2.
+ 
+ g2. d2. g2. d2.
+@@ -39,4 +44,8 @@ g2. d2. g2. d2.
+ g2.<b2.>e2. e2.
+ 
+ d2.<a2.>d2. d2.
+-d2. d2. d2. d2.
+\ No newline at end of file
++d2. d2. e2. f2.
++
++<b2.>e2. e2. e2.
++
++'a>g'2. '<<d>ad'2.
 \ No newline at end of file

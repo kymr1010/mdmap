@@ -1,4 +1,4 @@
-import { Connector } from "../Connector/Connector.jsx";
+import { PathElm } from "../Connector/Connector.jsx";
 import { Card } from "../schema/Card.js";
 import { CardRelation } from "../schema/CardRelation.js";
 import { CardConnector, Path } from "../schema/Connrctor.js";
