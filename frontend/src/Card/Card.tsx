@@ -50,6 +50,7 @@ export interface CardProps {
 
 export const CardElm = (props: CardProps) => {
   let ref!: HTMLDivElement;
+  let contentRef!: HTMLDivElement;
 
   const [size, setSize] = createSignal<Dimmension>({ ...props.card().size });
   const [title, setTitle] = createSignal(props.card().title);
@@ -86,12 +87,15 @@ export const CardElm = (props: CardProps) => {
 
   // ドラッグ＆リサイズフックをマウント時に適用
   onMount(() => {
+    // Drag by header bar
     useDrag({
-      ref,
+      ref: () => ref,
       getPos: props.nodePosition,
       setPos: props.setNodePosition,
       scaleFactor: props.scaleFactor,
       moveCallback: props.onMove,
+      // Allow dragging when clicking on children like h1 in header
+      strictTarget: false,
       upCallback: (diff: Dimmension) => {
         const newCard = {
           ...props.card(),
@@ -130,6 +134,32 @@ export const CardElm = (props: CardProps) => {
         }
       )
     );
+  });
+
+  // Enable dragging by the first H1 inside content (from markdown)
+  createEffect(() => {
+    // Depend on contents so effect re-runs when markdown changes
+    contents();
+    useDrag({
+      ref: () => (contentRef ? (contentRef.querySelector("h1") as HTMLElement | null) : null),
+      getPos: props.nodePosition,
+      setPos: props.setNodePosition,
+      scaleFactor: props.scaleFactor,
+      moveCallback: props.onMove,
+      // Allow clicks on descendants within the H1 if any
+      strictTarget: false,
+      upCallback: () => {
+        const newCard = {
+          ...props.card(),
+          position: props.nodePosition(),
+        };
+        if (props.onUpdateCard) {
+          props.onUpdateCard(newCard);
+        } else {
+          updateCard(newCard);
+        }
+      },
+    });
   });
 
   // createEffect(() => setPosition({ ...props.card().position }));
@@ -204,17 +234,10 @@ export const CardElm = (props: CardProps) => {
         }}
         macaronHover={isHovered() ? "hover" : undefined}
       >
-        <StyledCardHeader ref={ref}></StyledCardHeader>
+        <StyledCardHeader ref={(el) => (ref = el)}></StyledCardHeader>
         <StyledCardContent>
-          <div>
-            <h1>{title()}</h1>
-            {/* <p>
-              x:{props.nodePosition().x}, y:{props.nodePosition().y}
-            </p>
-            <p>
-              x:{props.cardPosition().x}, y:{props.cardPosition().y}
-            </p> */}
-            <div
+          <div ref={(el) => (contentRef = el)}>
+            <div class="markdown-body"
               innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
             ></div>
           </div>
@@ -414,7 +437,8 @@ const StyledCard = styled("div", {
 const StyledCardHeader = styled("div", {
   base: {
     width: "100%",
-    height: "1rem",
+    minHeight: "1rem",
+    cursor: "grab",
   },
 });
 
@@ -431,5 +455,9 @@ const StyledCardContent = styled("div", {
     width: "100%",
     height: "100%",
     flexGrow: 1,
+    // Local override: show grab cursor on markdown H1 for drag affordance
+    "& .markdown-body h1": {
+      cursor: "grab",
+    },
   },
 });

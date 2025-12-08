@@ -1,32 +1,63 @@
-import { Accessor, onCleanup } from "solid-js";
+import { onCleanup } from "solid-js";
 import { Dimmension } from "../schema/Point.js";
 
 // ref: ドラッグ対象の要素
 // getPos: 現在位置を返すシグナルの getter
 // setPos: 位置を更新するシグナルの setter
 export function useDrag(props: {
-  ref: HTMLElement;
+  // Accepts direct element or a getter returning the element later
+  ref: HTMLElement | (() => HTMLElement | null | undefined);
   getPos: () => Dimmension;
   setPos: (pos: Dimmension) => void;
   scaleFactor: () => number;
   moveCallback?: (pos: Dimmension) => void;
   upCallback?: (diff: Dimmension) => void;
+  /**
+   * If true (default), starts drag only when pointerdown target === ref.
+   * If false, allows pointerdown on any descendant of ref.
+   */
+  strictTarget?: boolean;
 }) {
-  // タッチデバイスでの既定の “パン” を無効化
-  props.ref.style.touchAction = "none";
+  let el: HTMLElement | null = null;
+  let rafId: number | null = null;
+
+  const resolveRef = (): HTMLElement | null => {
+    return typeof props.ref === "function" ? (props.ref() as HTMLElement | null) : (props.ref as HTMLElement);
+  };
+
+  const attach = () => {
+    if (el) return; // already attached
+    const node = resolveRef();
+    if (!node) {
+      // try again on next frame
+      rafId = window.requestAnimationFrame(attach);
+      return;
+    }
+    el = node;
+    // タッチデバイスでの既定の “パン” を無効化
+    el.style.touchAction = "none";
+    // 要素にドラッグ開始のイベントを登録
+    el.addEventListener("pointerdown", onPointerDown);
+  };
 
   let origin: Dimmension = { x: 0, y: 0 };
   let beforePos: Dimmension = { x: 0, y: 0 };
 
   const onPointerDown = (e: PointerEvent) => {
     // 重なっている要素への伝播を止める
+    if (!el) return;
     if (e.button !== 0) return;
-    if (e.target !== props.ref) return;
+    const strict = props.strictTarget ?? true;
+    if (strict) {
+      if (e.target !== el) return;
+    } else {
+      if (!(e.target instanceof Node) || !el.contains(e.target)) return;
+    }
     // e.stopPropagation();
     // e.preventDefault();
 
     // この要素にポインタをキャプチャ（ムーブ／アップもこの要素で受ける）
-    props.ref.setPointerCapture(e.pointerId);
+    el.setPointerCapture(e.pointerId);
 
     // 位置を記憶
     beforePos = props.getPos();
@@ -72,15 +103,16 @@ export function useDrag(props: {
         y: next.y - beforePos.y,
       });
     }
-    props.ref.releasePointerCapture(e.pointerId);
+    if (el) el.releasePointerCapture(e.pointerId);
   };
 
-  // 要素にドラッグ開始のイベントを登録
-  props.ref.addEventListener("pointerdown", onPointerDown);
+  // 初期アタッチ（ref が未設定でも再試行）
+  attach();
 
   // コンポーネントがアンマウントされるときに全てクリア
   onCleanup(() => {
-    props.ref.removeEventListener("pointerdown", onPointerDown);
+    if (rafId !== null) window.cancelAnimationFrame(rafId);
+    if (el) el.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
   });
