@@ -17,6 +17,8 @@ export function useDrag(props: {
    * If false, allows pointerdown on any descendant of ref.
    */
   strictTarget?: boolean;
+  /** optional guard to decide whether to start dragging */
+  startGuard?: (e: PointerEvent, el: HTMLElement) => boolean;
 }) {
   let el: HTMLElement | null = null;
   let rafId: number | null = null;
@@ -53,6 +55,7 @@ export function useDrag(props: {
     } else {
       if (!(e.target instanceof Node) || !el.contains(e.target)) return;
     }
+    if (props.startGuard && !props.startGuard(e, el)) return;
     // e.stopPropagation();
     // e.preventDefault();
 

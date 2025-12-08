@@ -23,6 +23,7 @@ import { updateCard } from "../hooks/useCardAPI.js";
 import { EditorPanel } from "../EditorPanel/EditorPanel.jsx";
 import { TagInput } from "../Tag/Tag.jsx";
 import { CardConnector, CardConnectorPoint } from "../schema/Connrctor.js";
+import { inputManager } from "../input/manager";
 
 export interface CardProps {
   mousePosition: Accessor<Dimmension>;
@@ -50,6 +51,7 @@ export interface CardProps {
 
 export const CardElm = (props: CardProps) => {
   let ref!: HTMLDivElement;
+  let cardRoot!: HTMLDivElement;
   let contentRef!: HTMLDivElement;
 
   const [size, setSize] = createSignal<Dimmension>({ ...props.card().size });
@@ -96,6 +98,13 @@ export const CardElm = (props: CardProps) => {
       moveCallback: props.onMove,
       // Allow dragging when clicking on children like h1 in header
       strictTarget: false,
+      startGuard: (e) =>
+        inputManager.canStartPointerDrag({
+          when: "card",
+          action: "card.move",
+          root: cardRoot,
+          event: e,
+        }),
       upCallback: (diff: Dimmension) => {
         const newCard = {
           ...props.card(),
@@ -148,6 +157,13 @@ export const CardElm = (props: CardProps) => {
       moveCallback: props.onMove,
       // Allow clicks on descendants within the H1 if any
       strictTarget: false,
+      startGuard: (e) =>
+        inputManager.canStartPointerDrag({
+          when: "card",
+          action: "card.move",
+          root: cardRoot,
+          event: e,
+        }),
       upCallback: () => {
         const newCard = {
           ...props.card(),
@@ -211,6 +227,7 @@ export const CardElm = (props: CardProps) => {
   return (
     <>
       <StyledCard
+        ref={(el) => (cardRoot = el)}
         onContextMenu={onContextMenu}
         onMouseEnter={() => {
           setIsHovered(true);
@@ -234,7 +251,7 @@ export const CardElm = (props: CardProps) => {
         }}
         macaronHover={isHovered() ? "hover" : undefined}
       >
-        <StyledCardHeader ref={(el) => (ref = el)}></StyledCardHeader>
+        <StyledCardHeader ref={(el) => (ref = el)} class="card-header"></StyledCardHeader>
         <StyledCardContent>
           <div ref={(el) => (contentRef = el)}>
             <div class="markdown-body"
