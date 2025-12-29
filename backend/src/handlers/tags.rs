@@ -36,19 +36,28 @@ pub async fn create_tag(
         "#,
     )
     .bind(&params.name)
-    .fetch_all(&pool)
+    .execute(&pool)
     .await;
 
     match result {
-        Ok(_) => (
-            StatusCode::CREATED,
-            Json(json!({"code": StatusCode::CREATED.to_string(), "message":"Success"})),
-        ),
+        Ok(res) => {
+            let id = res.last_insert_id() as i64;
+            let tag = Tag { id: id as i32, name: params.name };
+            (
+                StatusCode::CREATED,
+                Json(json!({
+                    "code": StatusCode::CREATED.to_string(),
+                    "message": "Success",
+                    "data": {"id": tag.id, "name": tag.name}
+                })),
+            )
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(
-                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message":e.to_string()}),
-            ),
+            Json(json!({
+                "code": StatusCode::INTERNAL_SERVER_ERROR.to_string(),
+                "message": e.to_string()
+            })),
         ),
     }
 }
@@ -66,7 +75,7 @@ pub async fn update_tag(
     )
     .bind(&params.name)
     .bind(&params.id)
-    .fetch_all(&pool)
+    .execute(&pool)
     .await;
 
     match result {
@@ -94,7 +103,7 @@ pub async fn delete_tag(
         "#,
     )
     .bind(&params.id)
-    .fetch_all(&pool)
+    .execute(&pool)
     .await;
 
     match result {

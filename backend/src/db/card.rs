@@ -9,7 +9,7 @@ SELECT
     (ST_X(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_X(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_x,
     (ST_Y(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_y,
     c.id, c.title, c.contents, c.created_at, c.updated_at, cc.card_parent_id AS parent_id,
-    COALESCE(JSON_ARRAYAGG(JSON_OBJECT('id', ct.tag_id)), JSON_ARRAY()) AS tag_ids,
+    COALESCE(JSON_ARRAYAGG(ct.tag_id), JSON_ARRAY()) AS tag_ids,
     COALESCE(JSON_ARRAYAGG(JSON_OBJECT('id', cc.card_child_id)), JSON_ARRAY()) AS card_ids
 FROM cards c
 LEFT JOIN card_tag AS ct ON ct.card_id = c.id

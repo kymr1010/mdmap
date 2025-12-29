@@ -68,24 +68,25 @@ pub async fn create_card(
 
     let card_id = res.last_insert_id() as i64;
 
-    // if !params.tag_ids.is_empty() {
-    //     for tag_id in &params.tag_ids {
-    //         if let Err(e) = sqlx::query(
-    //             r#"
-    //             INSERT INTO card_tag (card_id, tag_id)
-    //             VALUES (?, ?)
-    //         "#,
-    //         )
-    //         .bind(card_id)
-    //         .bind(tag_id)
-    //         .execute(&mut *tx)
-    //         .await
-    //         {
-    //             let _ = tx.rollback().await;
-    //             return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
-    //         }
-    //     }
-    // };
+    // persist card_tag relations
+    if !params.tag_ids.is_empty() {
+        for tag_id in &params.tag_ids {
+            if let Err(e) = sqlx::query(
+                r#"
+                INSERT INTO card_tag (card_id, tag_id)
+                VALUES (?, ?)
+            "#,
+            )
+            .bind(card_id)
+            .bind(tag_id)
+            .execute(&mut *tx)
+            .await
+            {
+                let _ = tx.rollback().await;
+                return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+            }
+        }
+    }
 
     if let Err(e) = tx.commit().await {
         return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
@@ -110,6 +111,10 @@ pub async fn update_card(
         params.position.x + params.size.x,
         params.position.y + params.size.y,
     );
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
 
     let result = sqlx::query(
         r#"
@@ -122,17 +127,50 @@ pub async fn update_card(
     .bind(&params.title)
     .bind(&params.contents)
     .bind(&params.id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await;
 
-    match result {
-        Ok(_) => match fetch_card_row_by_id(&pool, params.id).await {
-            Ok(row) => {
-                let card = Card::from(row);
-                ApiResponse::new_ok(StatusCode::OK, card)
-            }
-            Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        },
+    if let Err(e) = result {
+        let _ = tx.rollback().await;
+        return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+
+    // replace card_tag rows
+    let del_res = sqlx::query(
+        r#"DELETE FROM card_tag WHERE card_id = ?"#,
+    )
+    .bind(&params.id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = del_res {
+        let _ = tx.rollback().await;
+        return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+
+    for tag_id in &params.tag_ids {
+        if let Err(e) = sqlx::query(
+            r#"INSERT INTO card_tag (card_id, tag_id) VALUES (?, ?)"#,
+        )
+        .bind(&params.id)
+        .bind(tag_id)
+        .execute(&mut *tx)
+        .await
+        {
+            let _ = tx.rollback().await;
+            return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
+    }
+
+    match fetch_card_row_by_id(&pool, params.id).await {
+        Ok(row) => {
+            let card = Card::from(row);
+            ApiResponse::new_ok(StatusCode::OK, card)
+        }
         Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }

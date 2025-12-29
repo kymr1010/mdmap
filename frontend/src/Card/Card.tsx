@@ -21,7 +21,6 @@ import { MenuItem, useContextMenu } from "../hooks/useContextMenu.js";
 import { Portal } from "solid-js/web";
 import { updateCard } from "../hooks/useCardAPI.js";
 import { EditorPanel } from "../EditorPanel/EditorPanel.jsx";
-import { TagInput } from "../Tag/Tag.jsx";
 import { CardConnector, CardConnectorPoint } from "../schema/Connrctor.js";
 import { inputManager } from "../input/manager";
 
@@ -34,6 +33,8 @@ export interface CardProps {
   setCard: (card: Card) => void;
   scaleFactor: Accessor<number>;
   setEdittingCard: Setter<Card | null>;
+  isMinimized: Accessor<boolean>;
+  onToggleMinimize: (id: number) => void;
   startConnect: (
     e: PointerEvent,
     pos: Dimmension,
@@ -63,6 +64,7 @@ export const CardElm = (props: CardProps) => {
 
   const menuItems: MenuItem[] = [
     { label: "コピー", action: () => console.log("コピーしました") },
+    { label: "最小化/復元", action: () => props.onToggleMinimize(props.card().id) },
     {
       label: "編集",
       action: () => {
@@ -119,9 +121,16 @@ export const CardElm = (props: CardProps) => {
         }
       },
     });
-    dirs.forEach((dir) =>
+  });
+
+  // Attach resize handles only when rendered (not minimized)
+  createEffect(() => {
+    if (props.isMinimized()) return;
+    dirs.forEach((dir) => {
+      const el = handles[dir];
+      if (!el) return;
       useResize(
-        handles[dir],
+        el,
         dir,
         props.nodePosition,
         props.setNodePosition,
@@ -141,14 +150,15 @@ export const CardElm = (props: CardProps) => {
             updateCard(newCard);
           }
         }
-      )
-    );
+      );
+    });
   });
 
   // Enable dragging by the first H1 inside content (from markdown)
   createEffect(() => {
     // Depend on contents so effect re-runs when markdown changes
     contents();
+    if (props.isMinimized()) return;
     useDrag({
       ref: () => (contentRef ? (contentRef.querySelector("h1") as HTMLElement | null) : null),
       getPos: props.nodePosition,
@@ -247,47 +257,56 @@ export const CardElm = (props: CardProps) => {
           // left: `${pos().x}px`,
           // top: `${pos().y}px`,
           width: `${size().x}px`,
-          height: `${size().y}px`,
+          height: props.isMinimized() ? undefined : `${size().y}px`,
         }}
         macaronHover={isHovered() ? "hover" : undefined}
       >
-        <StyledCardHeader ref={(el) => (ref = el)} class="card-header"></StyledCardHeader>
-        <StyledCardContent>
-          <div ref={(el) => (contentRef = el)}>
-            <div class="markdown-body"
-              innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
-            ></div>
-          </div>
-          {dirs.map((dir) => (
-            <div
-              ref={(el) => (handles[dir] = el!)}
-              class="resize-handle"
-              style={getHandleStyle(dir, size())}
-            />
-          ))}
-          {computeConnectHandles().map(({ dir, pos }) => (
-            <div
-              class="connect-handle"
-              data-dir={dir}
-              onPointerDown={(e) =>
-                props.startConnect(e, pos, props.card().id, dir)
-              }
-              onMouseEnter={() =>
-                props.onNearestConnector({
-                  dir,
-                  cardId: props.card().id,
-                })
-              }
-              style={getConnectHandleStyle(dir, size(), isHovered)}
-            />
-          ))}
-        </StyledCardContent>
-        <StyledCardFooter>
-          <p> {props.card().id} -&gt; {props.card().parent_id}</p>
-          <p>{props.card().created_at}</p>
-          <p>{props.card().updated_at}</p>
-          <div class={style({ overflowX: "auto" })}>{<TagInput />}</div>
-        </StyledCardFooter>
+        <StyledCardHeader ref={(el) => (ref = el)} class="card-header">
+          {props.isMinimized() && (
+            <div style={{ fontWeight: 600, overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
+              {props.card().title || "(untitled)"}
+            </div>
+          )}
+        </StyledCardHeader>
+        <Show when={!props.isMinimized()}>
+          <StyledCardContent>
+            <div ref={(el) => (contentRef = el)}>
+              <div
+                class="markdown-body"
+                innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
+              ></div>
+            </div>
+            {dirs.map((dir) => (
+              <div
+                ref={(el) => (handles[dir] = el!)}
+                class="resize-handle"
+                style={getHandleStyle(dir, size())}
+              />
+            ))}
+            {computeConnectHandles().map(({ dir, pos }) => (
+              <div
+                class="connect-handle"
+                data-dir={dir}
+                onPointerDown={(e) => props.startConnect(e, pos, props.card().id, dir)}
+                onMouseEnter={() =>
+                  props.onNearestConnector({
+                    dir,
+                    cardId: props.card().id,
+                  })
+                }
+                style={getConnectHandleStyle(dir, size(), isHovered)}
+              />
+            ))}
+          </StyledCardContent>
+        </Show>
+        <Show when={!props.isMinimized()}>
+          <StyledCardFooter>
+            <p> {props.card().id} -&gt; {props.card().parent_id}</p>
+            <p>{props.card().created_at}</p>
+            <p>{props.card().updated_at}</p>
+            {/* Tag editing moved to EditorPanel */}
+          </StyledCardFooter>
+        </Show>
       </StyledCard>
 
       <Portal>

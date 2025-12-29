@@ -1,4 +1,4 @@
-import { createSignal, onMount, onCleanup, JSX } from "solid-js";
+import { createSignal, onMount, onCleanup, JSX, createEffect, on } from "solid-js";
 import Tagify from "@yaireo/tagify";
 import type { TagifySettings, TagifyTags } from "@yaireo/tagify";
 import { styled } from "@macaron-css/solid";
@@ -8,6 +8,7 @@ interface TagInputProps {
   whitelist?: string[];
   initialTags?: string[];
   onChange?: (tags: string[]) => void;
+  enforceWhitelist?: boolean;
 }
 
 export function TagInput(props: TagInputProps): JSX.Element {
@@ -15,10 +16,12 @@ export function TagInput(props: TagInputProps): JSX.Element {
   const [tags, setTags] = createSignal<string[]>(props.initialTags ?? []);
 
   let tagify: Tagify<TagifyTags>;
+  let suppressUpdate = false;
 
   onMount(() => {
     const settings: Partial<TagifySettings> = {
       whitelist: props.whitelist ?? [],
+      enforceWhitelist: props.enforceWhitelist ?? false,
       dropdown: {
         enabled: 0, // 入力時に候補リストを自動表示
         maxItems: 20,
@@ -42,11 +45,32 @@ export function TagInput(props: TagInputProps): JSX.Element {
     tagify.on("edit", () => updateTags());
 
     function updateTags() {
+      if (suppressUpdate) return;
       const current = tagify.value.map((item) => item.value);
       setTags(current);
       props.onChange?.(current);
     }
   });
+
+  // reflect external changes to initialTags
+  createEffect(
+    on(
+      () => props.initialTags,
+      (vals) => {
+        if (!tagify) return;
+        suppressUpdate = true;
+        try {
+          tagify.removeAllTags();
+          if (vals && vals.length) {
+            tagify.addTags(vals.map((v) => ({ value: v })));
+          }
+        } finally {
+          suppressUpdate = false;
+        }
+        setTags(vals ?? []);
+      }
+    )
+  );
 
   onCleanup(() => {
     tagify.destroy();

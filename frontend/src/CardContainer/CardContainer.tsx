@@ -37,9 +37,14 @@ export interface CardContainerProps {
   cardRelations: Accessor<CardRelation[]>;
   setCardRelations: Setter<CardRelation[]>;
   setEdittingCard: Setter<Card | null>;
+  // Optional: id to reveal/center on canvas
+  revealCardId?: Accessor<number | null>;
+  // Optional: left UI offset in px (e.g., sidebar width)
+  leftOffset?: number;
 }
 
 export const CardContainer = (props: CardContainerProps) => {
+  const MINIMIZED_HEIGHT = 32; // px, visual height of minimized card header
   let ref!: HTMLDivElement;
   let containerRef: HTMLDivElement | undefined;
   const tileSize = 2000;
@@ -68,6 +73,7 @@ export const CardContainer = (props: CardContainerProps) => {
   });
   const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
+  const [minimized, setMinimized] = createSignal<Set<number>>(new Set());
 
   // Compute a quick id->card map for lookups
   const cardMap = () => new Map(props.cards().map((c) => [c.id, c] as const));
@@ -76,6 +82,28 @@ export const CardContainer = (props: CardContainerProps) => {
   const posGetters = new Map<number, Accessor<Dimmension>>();
   const posSetters = new Map<number, Setter<Dimmension>>();
   const lastDragDelta = new Map<number, Dimmension>();
+
+  // Minimize helpers
+  const isCardVisible = (id: number) => {
+    // visible if no ancestor is minimized
+    const map = cardMap();
+    let cur = map.get(id);
+    while (cur && cur.parent_id != null) {
+      if (minimized().has(cur.parent_id)) return false;
+      cur = map.get(cur.parent_id);
+    }
+    return true;
+  };
+
+  const isMinimized = (id: number) => minimized().has(id);
+  const toggleMinimize = (id: number) => {
+    setMinimized((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
@@ -232,6 +260,27 @@ export const CardContainer = (props: CardContainerProps) => {
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
+  // Center view on a given card id (when provided)
+  createEffect(
+    on(
+      () => props.revealCardId?.(),
+      (id) => {
+        if (!id) return;
+        const card = cardMap().get(id);
+        if (!card) return;
+        const abs = getAbsPos(id);
+        const centerX = (props.leftOffset ?? 0) + (window.innerWidth - (props.leftOffset ?? 0)) / 2;
+        const centerY = window.innerHeight / 2;
+        const targetX = abs.x + card.size.x / 2;
+        const targetY = abs.y + card.size.y / 2;
+        setPosition({
+          x: Math.floor(centerX - scale() * targetX),
+          y: Math.floor(centerY - scale() * targetY),
+        });
+      }
+    )
+  );
+
   const addCard = () => {
     const newCard = {
       id: 0,
@@ -335,18 +384,22 @@ export const CardContainer = (props: CardContainerProps) => {
     if (!card) return undefined;
     // Prefer live absolute position if available (reactive during drag)
     const live = posGetters.get(point.cardId)?.();
-    const abs = live ?? getAbsPos(point.cardId);
+    const absBase = live ?? getAbsPos(point.cardId);
+    const minimized = isMinimized(point.cardId);
+    const hEff = minimized ? MINIMIZED_HEIGHT : card.size.y;
     const w = card.size.x;
-    const h = card.size.y;
+    const abs: Dimmension = minimized
+      ? { x: absBase.x, y: absBase.y + card.size.y / 2 - hEff / 2 }
+      : absBase;
     switch (point.dir) {
       case "n":
         return { x: abs.x + w / 2, y: abs.y };
       case "s":
-        return { x: abs.x + w / 2, y: abs.y + h };
+        return { x: abs.x + w / 2, y: abs.y + hEff };
       case "e":
-        return { x: abs.x + w, y: abs.y + h / 2 };
+        return { x: abs.x + w, y: abs.y + hEff / 2 };
       case "w":
-        return { x: abs.x, y: abs.y + h / 2 };
+        return { x: abs.x, y: abs.y + hEff / 2 };
     }
   };
 
@@ -403,6 +456,7 @@ export const CardContainer = (props: CardContainerProps) => {
         }}
         style={{
           position: "absolute",
+          left: `${props.leftOffset ?? 0}px`,
           "background-size": `${20 * scale()}px ${20 * scale()}px`,
           "background-position": `${position().x}px ${position().y}px`,
         }}
@@ -419,7 +473,7 @@ export const CardContainer = (props: CardContainerProps) => {
             }px, 0) scale(${scale()})`,
           }}
         >
-          <For each={props.cards()}>
+          <For each={props.cards().filter((c) => isCardVisible(c.id))}>
             {(card) => {
               const id = card.id;
               const cardAcc = () => props.cards().find((c) => c.id === id)!;
@@ -433,7 +487,11 @@ export const CardContainer = (props: CardContainerProps) => {
 
               return (
                 <div
-                  style={{ position: "absolute", left: `${position().x}px`, top: `${position().y}px` }}
+                  style={{
+                    position: "absolute",
+                    left: `${position().x}px`,
+                    top: `${position().y + (isMinimized(id) ? cardAcc().size.y / 2 - MINIMIZED_HEIGHT / 2 : 0)}px`,
+                  }}
                 >
                   <CardElm
                     card={cardAcc}
@@ -441,6 +499,8 @@ export const CardContainer = (props: CardContainerProps) => {
                     setNodePosition={setPosition}
                     nodePosition={position}
                     cardPosition={cardPosition}
+                    isMinimized={() => isMinimized(id)}
+                    onToggleMinimize={toggleMinimize}
                     setCard={(newCard) => {
                       // Ensure stored position remains relative to parent
                       const parentAbs = newCard.parent_id ? getAbsPos(newCard.parent_id) : { x: 0, y: 0 };
@@ -563,11 +623,12 @@ export const CardContainer = (props: CardContainerProps) => {
           >
             <For each={props.cardRelations()}>
               {(rel) => {
+                const visible = () => isCardVisible(rel.parent_id) && isCardVisible(rel.child_id);
                 if (!rel.connector) return null;
                 const parentPos = () => connectorPointToPos(rel.connector!.parent);
                 const childPos = () => connectorPointToPos(rel.connector!.child);
                 return (
-                  <Show when={parentPos() && childPos()}>
+                  <Show when={visible() && parentPos() && childPos()}>
                     <PathElm
                       path={{
                         parent: parentPos()!,

@@ -1,5 +1,6 @@
 import { Card } from "../schema/Card.js";
 import { fetchAPI } from "./useAPI.js";
+import { extractFirstH1 } from "../utils/markdown.js";
 
 export const getCards = async () => {
   const res = await fetchAPI("cards", {
@@ -11,12 +12,13 @@ export const getCards = async () => {
 
 export const createCard = async (card: Partial<Card>): Promise<Card> => {
   console.log("Creating card: %o", JSON.stringify(card));
+  const title = extractFirstH1(card.contents ?? "") ?? (card.title ?? "");
   const res = await fetchAPI("card", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(card),
+    body: JSON.stringify({ ...card, title }),
   });
   // API returns { code, message, data }
   return res.data as Card;
@@ -24,12 +26,13 @@ export const createCard = async (card: Partial<Card>): Promise<Card> => {
 
 export const updateCard = async (card: Card) => {
   console.log("Updating card: %o", JSON.stringify(card));
+  const title = extractFirstH1(card.contents ?? "") ?? card.title;
   await fetchAPI("card", {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(card),
+    body: JSON.stringify({ ...card, title }),
   });
 };
 

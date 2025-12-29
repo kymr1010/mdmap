@@ -14,7 +14,7 @@ import {
 import { getCardRelations } from "./hooks/useConnectAPI.js";
 import { CardRelation } from "./schema/CardRelation.js";
 // import { DataCheck } from "./DataCheck/DataCheck.jsx";
-import { Tree } from "./Tree/Tree.jsx";
+import SideCardTree from "./SideCardTree/SideCardTree.jsx";
 
 globalStyle("body", {
   "--color-bg": "#fff",
@@ -39,6 +39,8 @@ function App() {
   const [edittingCard, setEdittingCard] = createSignal<Card | null>(null);
   const [cards, setCards] = createSignal<Card[]>([]);
   const [cardRelations, setCardRelations] = createSignal<CardRelation[]>([]);
+  const [revealCardId, setRevealCardId] = createSignal<number | null>(null);
+  const sidebarWidth = 280;
 
   // NodeTree removed for simplicity; render from cards directly
 
@@ -65,7 +67,11 @@ function App() {
       }}
     >
       <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
+      <SideCardTree
+        cards={cards}
+        onReveal={(id) => setRevealCardId(id)}
+        width={sidebarWidth}
+      />
       <CardContainer
         position={{ x: 0, y: 0 }}
         cards={cards}
@@ -73,6 +79,8 @@ function App() {
         cardRelations={cardRelations}
         setCardRelations={setCardRelations}
         setEdittingCard={setEdittingCard}
+        revealCardId={revealCardId}
+        leftOffset={sidebarWidth}
       />
       <EditorPanel
         card={edittingCard}
