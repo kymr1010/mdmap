@@ -35,6 +35,7 @@ export interface CardProps {
   setEdittingCard: Setter<Card | null>;
   isMinimized: Accessor<boolean>;
   onToggleMinimize: (id: number) => void;
+  onOpenPage: (id: number) => void;
   startConnect: (
     e: PointerEvent,
     pos: Dimmension,
@@ -65,6 +66,7 @@ export const CardElm = (props: CardProps) => {
   const menuItems: MenuItem[] = [
     { label: "コピー", action: () => console.log("コピーしました") },
     { label: "最小化/復元", action: () => props.onToggleMinimize(props.card().id) },
+    { label: "ページ表示", action: () => props.onOpenPage(props.card().id) },
     {
       label: "編集",
       action: () => {
@@ -101,7 +103,7 @@ export const CardElm = (props: CardProps) => {
       // Allow dragging when clicking on children like h1 in header
       strictTarget: false,
       startGuard: (e) =>
-        inputManager.canStartPointerDrag({
+        !props.isMaximized() && inputManager.canStartPointerDrag({
           when: "card",
           action: "card.move",
           root: cardRoot,

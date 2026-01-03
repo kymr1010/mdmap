@@ -19,6 +19,8 @@ export function useDrag(props: {
   strictTarget?: boolean;
   /** optional guard to decide whether to start dragging */
   startGuard?: (e: PointerEvent, el: HTMLElement) => boolean;
+  /** optional viewport offset to subtract from client coordinates (e.g. sidebar width) */
+  getClientOffset?: () => Dimmension;
 }) {
   let el: HTMLElement | null = null;
   let rafId: number | null = null;
@@ -68,9 +70,10 @@ export function useDrag(props: {
     // マウス座標と要素左上とのオフセットを記憶
     const pos = props.getPos();
 
+    const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
     origin = {
-      x: Math.floor(e.clientX / props.scaleFactor() - pos.x),
-      y: Math.floor(e.clientY / props.scaleFactor() - pos.y),
+      x: Math.floor((e.clientX - off.x) / props.scaleFactor() - pos.x),
+      y: Math.floor((e.clientY - off.y) / props.scaleFactor() - pos.y),
     };
 
     window.addEventListener("pointermove", onPointerMove);
@@ -79,9 +82,10 @@ export function useDrag(props: {
 
   const onPointerMove = (e: PointerEvent) => {
     // 計算済みの新しい位置（origin を差し引く）
+    const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
     const next = {
-      x: Math.floor(e.clientX / props.scaleFactor() - origin.x),
-      y: Math.floor(e.clientY / props.scaleFactor() - origin.y),
+      x: Math.floor((e.clientX - off.x) / props.scaleFactor() - origin.x),
+      y: Math.floor((e.clientY - off.y) / props.scaleFactor() - origin.y),
     };
     // 要素位置を更新
     props.setPos(next);
@@ -97,9 +101,10 @@ export function useDrag(props: {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
     if (props.upCallback !== undefined) {
+      const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
       const next = {
-        x: Math.floor(e.clientX / props.scaleFactor() - origin.x),
-        y: Math.floor(e.clientY / props.scaleFactor() - origin.y),
+        x: Math.floor((e.clientX - off.x) / props.scaleFactor() - origin.x),
+        y: Math.floor((e.clientY - off.y) / props.scaleFactor() - origin.y),
       };
       props.upCallback({
         x: next.x - beforePos.x,

@@ -41,6 +41,8 @@ function App() {
   const [cardRelations, setCardRelations] = createSignal<CardRelation[]>([]);
   const [revealCardId, setRevealCardId] = createSignal<number | null>(null);
   const sidebarWidth = 280;
+  const [sidebarOpen, setSidebarOpen] = createSignal(true);
+  const effectiveSidebarWidth = () => (sidebarOpen() ? sidebarWidth : 0);
 
   // NodeTree removed for simplicity; render from cards directly
 
@@ -69,8 +71,20 @@ function App() {
       <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
       <SideCardTree
         cards={cards}
-        onReveal={(id) => setRevealCardId(id)}
+        onReveal={(id) => {
+          setRevealCardId(id);
+          try {
+            window.history.pushState({ cardId: id }, "", `/card/${id}`);
+          } catch {}
+          // Notify listeners (CardContainer) to sync overlay state
+          try {
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          } catch {}
+        }}
         width={sidebarWidth}
+        open={sidebarOpen()}
+        onClose={() => setSidebarOpen(false)}
+        onOpen={() => setSidebarOpen(true)}
       />
       <CardContainer
         position={{ x: 0, y: 0 }}
@@ -80,7 +94,7 @@ function App() {
         setCardRelations={setCardRelations}
         setEdittingCard={setEdittingCard}
         revealCardId={revealCardId}
-        leftOffset={sidebarWidth}
+        onRequestReveal={(id) => setRevealCardId(id)}
       />
       <EditorPanel
         card={edittingCard}

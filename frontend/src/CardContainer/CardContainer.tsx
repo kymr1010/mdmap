@@ -8,6 +8,7 @@ import {
   from,
   on,
   onMount,
+  onCleanup,
   Setter,
   Show,
 } from "solid-js";
@@ -29,6 +30,7 @@ import { connectCards, disconnectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
 import { CardElm } from "../Card/Card.jsx";
 import { getAbsPosFromMap } from "../utils/position.js";
+import { PageView } from "../PageView/PageView.jsx";
 
 export interface CardContainerProps {
   position: Dimmension;
@@ -39,8 +41,8 @@ export interface CardContainerProps {
   setEdittingCard: Setter<Card | null>;
   // Optional: id to reveal/center on canvas
   revealCardId?: Accessor<number | null>;
-  // Optional: left UI offset in px (e.g., sidebar width)
-  leftOffset?: number;
+  // Optional: allow container to request a reveal (e.g., from URL)
+  onRequestReveal?: (id: number) => void;
 }
 
 export const CardContainer = (props: CardContainerProps) => {
@@ -74,6 +76,7 @@ export const CardContainer = (props: CardContainerProps) => {
   const [tiles, setTiles] = createSignal<Record<string, Array<number>>>({});
   const [nowTile, setNowTile] = createSignal<string>("0,0");
   const [minimized, setMinimized] = createSignal<Set<number>>(new Set());
+  const [pageViewId, setPageViewId] = createSignal<number | null>(null);
 
   // Compute a quick id->card map for lookups
   const cardMap = () => new Map(props.cards().map((c) => [c.id, c] as const));
@@ -104,6 +107,66 @@ export const CardContainer = (props: CardContainerProps) => {
       return next;
     });
   };
+
+  const pushUrlForCard = (id: number) => {
+    try {
+      window.history.pushState({ cardId: id }, "", `/card/${id}/view`);
+    } catch {}
+  };
+  const pushUrlHome = () => {
+    try {
+      window.history.pushState({}, "", `/`);
+    } catch {}
+  };
+  const openPage = (id: number) => {
+    setPageViewId(id);
+    pushUrlForCard(id);
+  };
+  const closePage = () => {
+    const id = pageViewId();
+    setPageViewId(null);
+    if (id != null) {
+      try {
+        window.history.pushState({ cardId: id }, "", `/card/${id}`);
+      } catch {}
+    } else {
+      pushUrlHome();
+    }
+  };
+
+  const parsePath = (): { kind: "view" | "page" | null; id: number | null } => {
+    const path = window.location.pathname;
+    let m = path.match(/^\/card\/(\d+)\/view$/);
+    if (m) {
+      const n = Number(m[1]);
+      return { kind: "view", id: Number.isFinite(n) ? n : null };
+    }
+    m = path.match(/^\/card\/(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      return { kind: "page", id: Number.isFinite(n) ? n : null };
+    }
+    return { kind: null, id: null };
+  };
+
+  onMount(() => {
+    const initial = parsePath();
+    if (initial.kind === "view" && initial.id != null) setPageViewId(initial.id);
+    if (initial.kind === "page" && initial.id != null) props.onRequestReveal?.(initial.id);
+    const handler = () => {
+      const p = parsePath();
+      if (p.kind === "view") {
+        setPageViewId(p.id);
+      } else if (p.kind === "page") {
+        setPageViewId(null);
+        if (p.id != null) props.onRequestReveal?.(p.id);
+      } else {
+        setPageViewId(null);
+      }
+    };
+    window.addEventListener("popstate", handler);
+    onCleanup(() => window.removeEventListener("popstate", handler));
+  });
 
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
@@ -261,25 +324,22 @@ export const CardContainer = (props: CardContainerProps) => {
   });
 
   // Center view on a given card id (when provided)
-  createEffect(
-    on(
-      () => props.revealCardId?.(),
-      (id) => {
-        if (!id) return;
-        const card = cardMap().get(id);
-        if (!card) return;
-        const abs = getAbsPos(id);
-        const centerX = (props.leftOffset ?? 0) + (window.innerWidth - (props.leftOffset ?? 0)) / 2;
-        const centerY = window.innerHeight / 2;
-        const targetX = abs.x + card.size.x / 2;
-        const targetY = abs.y + card.size.y / 2;
-        setPosition({
-          x: Math.floor(centerX - scale() * targetX),
-          y: Math.floor(centerY - scale() * targetY),
-        });
-      }
-    )
-  );
+  // Reacts also when cards are loaded later so initial deep link works.
+  createEffect(() => {
+    const id = props.revealCardId?.();
+    if (!id) return;
+    const card = cardMap().get(id);
+    if (!card) return;
+    const abs = getAbsPos(id);
+    const centerX = window.innerWidth / 2;
+    const centerY = window.innerHeight / 2;
+    const targetX = abs.x + card.size.x / 2;
+    const targetY = abs.y + card.size.y / 2;
+    setPosition({
+      x: Math.floor(centerX - scale() * targetX),
+      y: Math.floor(centerY - scale() * targetY),
+    });
+  });
 
   const addCard = () => {
     const newCard = {
@@ -456,7 +516,6 @@ export const CardContainer = (props: CardContainerProps) => {
         }}
         style={{
           position: "absolute",
-          left: `${props.leftOffset ?? 0}px`,
           "background-size": `${20 * scale()}px ${20 * scale()}px`,
           "background-position": `${position().x}px ${position().y}px`,
         }}
@@ -501,6 +560,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     cardPosition={cardPosition}
                     isMinimized={() => isMinimized(id)}
                     onToggleMinimize={toggleMinimize}
+                    onOpenPage={openPage}
                     setCard={(newCard) => {
                       // Ensure stored position remains relative to parent
                       const parentAbs = newCard.parent_id ? getAbsPos(newCard.parent_id) : { x: 0, y: 0 };
@@ -650,6 +710,15 @@ export const CardContainer = (props: CardContainerProps) => {
           </svg>
         </div>
       </StyledCardContainer>
+      <Show when={pageViewId() != null}>
+        <PageView
+          card={() => props.cards().find((c) => c.id === pageViewId()!)}
+          cards={props.cards}
+          relations={props.cardRelations}
+          onClose={() => closePage()}
+          onNavigate={(id) => openPage(id)}
+        />
+      </Show>
       <div
         class={style({
           position: "absolute",
