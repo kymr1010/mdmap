@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // DB プール
     let pool = db::create_pool().await;
+    sqlx::migrate!("./migrations").run(&pool).await?;
     let auth_state = auth::AuthState::from_env();
 
     // CORS

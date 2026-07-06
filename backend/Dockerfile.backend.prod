@@ -3,6 +3,7 @@ FROM rust:1.96-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
+COPY migrations ./migrations
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release
 RUN rm -rf src target/release/deps/memoapp_backend*
