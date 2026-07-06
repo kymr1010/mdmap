@@ -17,8 +17,8 @@ import { CardRelation } from "./schema/CardRelation.js";
 import SideCardTree from "./SideCardTree/SideCardTree.jsx";
 import { getAuthStatus, login, logout } from "./hooks/useAuthAPI.js";
 
-const LOGIN_QUERY_KEY = "";
-const LOGIN_QUERY_VALUE = "";
+const LOGIN_QUERY_KEY = import.meta.env.VITE_LOGIN_QUERY_KEY ?? "";
+const LOGIN_QUERY_VALUE = import.meta.env.VITE_LOGIN_QUERY_VALUE ?? "";
 
 globalStyle("body", {
   "--color-bg": "#fff",
@@ -58,7 +58,11 @@ function App() {
   onMount(async () => {
     const syncLoginControls = () => {
       const params = new URLSearchParams(window.location.search);
-      setShowLoginControls(params.get(LOGIN_QUERY_KEY) === LOGIN_QUERY_VALUE);
+      setShowLoginControls(
+        LOGIN_QUERY_KEY.length > 0 &&
+          LOGIN_QUERY_VALUE.length > 0 &&
+          params.get(LOGIN_QUERY_KEY) === LOGIN_QUERY_VALUE,
+      );
     };
 
     syncLoginControls();
