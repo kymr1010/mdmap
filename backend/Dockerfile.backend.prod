@@ -15,7 +15,7 @@ FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/* \
   && useradd --system --create-home --shell /usr/sbin/nologin memoapp
 
@@ -23,5 +23,6 @@ COPY --from=builder /app/target/release/memoapp-backend /usr/local/bin/memoapp-b
 
 USER memoapp
 EXPOSE 8082
+HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 CMD curl -fsS http://127.0.0.1:8082/ >/dev/null || exit 1
 
 CMD ["memoapp-backend"]
