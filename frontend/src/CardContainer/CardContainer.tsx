@@ -54,6 +54,7 @@ export const CardContainer = (props: CardContainerProps) => {
 
   const [scale, setScale] = createSignal<number>(1);
   const [zoomLevel, setZoomLevel] = createSignal<number>(0);
+  const [isPinching, setIsPinching] = createSignal(false);
 
   const ZOOM = {
     MAX: 5,
@@ -79,6 +80,15 @@ export const CardContainer = (props: CardContainerProps) => {
   const [minimized, setMinimized] = createSignal<Set<number>>(new Set());
   const [pageViewId, setPageViewId] = createSignal<number | null>(null);
   const [pendingRevealId, setPendingRevealId] = createSignal<number | null>(null);
+  const touchPointers = new Map<number, Dimmension>();
+  let pinchStart:
+    | {
+        distance: number;
+        scale: number;
+        position: Dimmension;
+        center: Dimmension;
+      }
+    | null = null;
 
   // Compute a quick id->card map for lookups
   const cardMap = () => new Map(props.cards().map((c) => [c.id, c] as const));
@@ -398,33 +408,125 @@ export const CardContainer = (props: CardContainerProps) => {
   //   })
   // );
 
-  createEffect(
-    on(
-      zoomLevel,
-      (current, prev = 0) => {
-        setScale(Math.pow(ZOOM.FACTOR, zoomLevel()));
-        const factor = Math.pow(ZOOM.FACTOR, current - prev);
-        console.log(factor);
-        const positionFix = {
-          x: mousePosition().x * (1 - factor), // 拡縮に伴うマウスの移動ベクトル（移動前-移動後）
-          y: mousePosition().y * (1 - factor),
-        };
-        setPosition((prev) => {
-          return {
-            x: Math.floor(prev.x + positionFix.x), // 移動ベクトルを加算することでマウス座標を中心に拡縮
-            y: Math.floor(prev.y + positionFix.y),
-          };
-        });
-        setMousePosition((prev) => {
-          return {
-            x: Math.floor(prev.x * factor), // 移動後ベクトル
-            y: Math.floor(prev.y * factor),
-          };
-        });
-      },
-      { defer: true }
-    )
-  );
+  const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+
+  const zoomBounds = () => ({
+    min: Math.pow(ZOOM.FACTOR, ZOOM.MIN),
+    max: Math.pow(ZOOM.FACTOR, ZOOM.MAX),
+  });
+
+  const distance = (a: Dimmension, b: Dimmension) =>
+    Math.hypot(a.x - b.x, a.y - b.y);
+
+  const midpoint = (a: Dimmension, b: Dimmension): Dimmension => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  });
+
+  const setScaleAroundScreenPoint = (nextScale: number, screenPoint: Dimmension) => {
+    const { min, max } = zoomBounds();
+    const clampedScale = clamp(nextScale, min, max);
+    const worldPoint = {
+      x: (screenPoint.x - position().x) / scale(),
+      y: (screenPoint.y - position().y) / scale(),
+    };
+    const nextPosition = {
+      x: Math.floor(screenPoint.x - worldPoint.x * clampedScale),
+      y: Math.floor(screenPoint.y - worldPoint.y * clampedScale),
+    };
+
+    setScale(clampedScale);
+    setZoomLevel(Math.log(clampedScale) / Math.log(ZOOM.FACTOR));
+    setPosition(nextPosition);
+    setMousePosition({
+      x: screenPoint.x - nextPosition.x,
+      y: screenPoint.y - nextPosition.y,
+    });
+  };
+
+  const getTwoTouchPoints = () => {
+    const points = Array.from(touchPointers.values());
+    if (points.length < 2) return null;
+    return [points[0], points[1]] as const;
+  };
+
+  const startPinch = () => {
+    const points = getTwoTouchPoints();
+    if (!points) return;
+    pinchStart = {
+      distance: distance(points[0], points[1]),
+      scale: scale(),
+      position: position(),
+      center: midpoint(points[0], points[1]),
+    };
+    setIsPinching(true);
+  };
+
+  const updatePinch = () => {
+    const points = getTwoTouchPoints();
+    if (!points || !pinchStart || pinchStart.distance <= 0) return;
+
+    const center = midpoint(points[0], points[1]);
+    const nextDistance = distance(points[0], points[1]);
+    const { min, max } = zoomBounds();
+    const nextScale = clamp(
+      pinchStart.scale * (nextDistance / pinchStart.distance),
+      min,
+      max
+    );
+    const worldCenter = {
+      x: (pinchStart.center.x - pinchStart.position.x) / pinchStart.scale,
+      y: (pinchStart.center.y - pinchStart.position.y) / pinchStart.scale,
+    };
+    const nextPosition = {
+      x: Math.floor(center.x - worldCenter.x * nextScale),
+      y: Math.floor(center.y - worldCenter.y * nextScale),
+    };
+
+    setScale(nextScale);
+    setZoomLevel(Math.log(nextScale) / Math.log(ZOOM.FACTOR));
+    setPosition(nextPosition);
+    setMousePosition({
+      x: center.x - nextPosition.x,
+      y: center.y - nextPosition.y,
+    });
+  };
+
+  const handlePointerDown = (event: PointerEvent) => {
+    if (event.pointerType !== "touch") return;
+    touchPointers.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    if (touchPointers.size === 2) {
+      event.preventDefault();
+      startPinch();
+    }
+  };
+
+  const handlePointerMove = (event: PointerEvent) => {
+    if (event.pointerType !== "touch" || !touchPointers.has(event.pointerId)) return;
+    touchPointers.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    if (isPinching()) {
+      event.preventDefault();
+      updatePinch();
+    }
+  };
+
+  const handlePointerEnd = (event: PointerEvent) => {
+    if (event.pointerType !== "touch") return;
+    touchPointers.delete(event.pointerId);
+    if (touchPointers.size < 2) {
+      pinchStart = null;
+      setIsPinching(false);
+    } else {
+      startPinch();
+    }
+  };
 
   onMount(() => {
     useDrag({
@@ -432,6 +534,8 @@ export const CardContainer = (props: CardContainerProps) => {
       getPos: position,
       setPos: setPosition,
       scaleFactor: () => 1,
+      startGuard: () => touchPointers.size < 2 && !isPinching(),
+      continueGuard: () => !isPinching(),
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
@@ -499,8 +603,12 @@ export const CardContainer = (props: CardContainerProps) => {
     if (zoomLevel() + delta > ZOOM.MAX || zoomLevel() + delta < ZOOM.MIN)
       return;
 
-    setZoomLevel((prev) =>
-      Math.max(ZOOM.MIN, Math.min(ZOOM.MAX, prev + delta))
+    setScaleAroundScreenPoint(
+      Math.pow(ZOOM.FACTOR, zoomLevel() + delta),
+      {
+        x: event.clientX,
+        y: event.clientY,
+      }
     );
   };
 
@@ -630,6 +738,10 @@ export const CardContainer = (props: CardContainerProps) => {
         id="card-container"
         ref={ref}
         on:wheel={handleScroll}
+        on:pointerdown={handlePointerDown}
+        on:pointermove={handlePointerMove}
+        on:pointerup={handlePointerEnd}
+        on:pointercancel={handlePointerEnd}
         on:mousemove={(e) => {
           setMousePosition({
             x: e.clientX - position().x,

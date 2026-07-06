@@ -19,6 +19,8 @@ export function useDrag(props: {
   strictTarget?: boolean;
   /** optional guard to decide whether to start dragging */
   startGuard?: (e: PointerEvent, el: HTMLElement) => boolean;
+  /** optional guard to keep an active drag moving */
+  continueGuard?: () => boolean;
   /** optional viewport offset to subtract from client coordinates (e.g. sidebar width) */
   getClientOffset?: () => Dimmension;
 }) {
@@ -81,6 +83,8 @@ export function useDrag(props: {
   };
 
   const onPointerMove = (e: PointerEvent) => {
+    if (props.continueGuard && !props.continueGuard()) return;
+
     // 計算済みの新しい位置（origin を差し引く）
     const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
     const next = {
