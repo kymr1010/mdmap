@@ -32,6 +32,7 @@ export interface CardProps {
   card: Accessor<Card>;
   setCard: (card: Card) => void;
   scaleFactor: Accessor<number>;
+  canEdit: Accessor<boolean>;
   setEdittingCard: Setter<Card | null>;
   isMinimized: Accessor<boolean>;
   onToggleMinimize: (id: number) => void;
@@ -63,18 +64,22 @@ export const CardElm = (props: CardProps) => {
   const [isEditing, setIsEditing] = createSignal(false);
   const [isHovered, setIsHovered] = createSignal(false);
 
-  const menuItems: MenuItem[] = [
+  const menuItems = (): MenuItem[] => [
     { label: "コピー", action: () => console.log("コピーしました") },
     { label: "最小化/復元", action: () => props.onToggleMinimize(props.card().id) },
     { label: "ページ表示", action: () => props.onOpenPage(props.card().id) },
-    {
-      label: "編集",
-      action: () => {
-        setIsEditing(true);
-        props.setEdittingCard(props.card());
-      },
-    },
-    ...(props.card().parent_id != null
+    ...(props.canEdit()
+      ? [
+          {
+            label: "編集",
+            action: () => {
+              setIsEditing(true);
+              props.setEdittingCard(props.card());
+            },
+          } as MenuItem,
+        ]
+      : []),
+    ...(props.canEdit() && props.card().parent_id != null
       ? [
           {
             label: "接続解除",
@@ -82,10 +87,14 @@ export const CardElm = (props: CardProps) => {
           } as MenuItem,
         ]
       : []),
-    {
-      label: "削除",
-      action: () => props.onDelete?.(props.card().id),
-    },
+    ...(props.canEdit()
+      ? [
+          {
+            label: "削除",
+            action: () => props.onDelete?.(props.card().id),
+          } as MenuItem,
+        ]
+      : []),
   ];
   const { onContextMenu, ContextMenu } = useContextMenu(menuItems);
   const dirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const;
@@ -103,7 +112,8 @@ export const CardElm = (props: CardProps) => {
       // Allow dragging when clicking on children like h1 in header
       strictTarget: false,
       startGuard: (e) =>
-        !props.isMaximized() && inputManager.canStartPointerDrag({
+        props.canEdit() &&
+        inputManager.canStartPointerDrag({
           when: "card",
           action: "card.move",
           root: cardRoot,
@@ -128,6 +138,7 @@ export const CardElm = (props: CardProps) => {
   // Attach resize handles only when rendered (not minimized)
   createEffect(() => {
     if (props.isMinimized()) return;
+    if (!props.canEdit()) return;
     dirs.forEach((dir) => {
       const el = handles[dir];
       if (!el) return;
@@ -170,6 +181,7 @@ export const CardElm = (props: CardProps) => {
       // Allow clicks on descendants within the H1 if any
       strictTarget: false,
       startGuard: (e) =>
+        props.canEdit() &&
         inputManager.canStartPointerDrag({
           when: "card",
           action: "card.move",
@@ -278,27 +290,29 @@ export const CardElm = (props: CardProps) => {
                 innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
               ></div>
             </div>
-            {dirs.map((dir) => (
-              <div
-                ref={(el) => (handles[dir] = el!)}
-                class="resize-handle"
-                style={getHandleStyle(dir, size())}
-              />
-            ))}
-            {computeConnectHandles().map(({ dir, pos }) => (
-              <div
-                class="connect-handle"
-                data-dir={dir}
-                onPointerDown={(e) => props.startConnect(e, pos, props.card().id, dir)}
-                onMouseEnter={() =>
-                  props.onNearestConnector({
-                    dir,
-                    cardId: props.card().id,
-                  })
-                }
-                style={getConnectHandleStyle(dir, size(), isHovered)}
-              />
-            ))}
+            <Show when={props.canEdit()}>
+              {dirs.map((dir) => (
+                <div
+                  ref={(el) => (handles[dir] = el!)}
+                  class="resize-handle"
+                  style={getHandleStyle(dir, size())}
+                />
+              ))}
+              {computeConnectHandles().map(({ dir, pos }) => (
+                <div
+                  class="connect-handle"
+                  data-dir={dir}
+                  onPointerDown={(e) => props.startConnect(e, pos, props.card().id, dir)}
+                  onMouseEnter={() =>
+                    props.onNearestConnector({
+                      dir,
+                      cardId: props.card().id,
+                    })
+                  }
+                  style={getConnectHandleStyle(dir, size(), isHovered)}
+                />
+              ))}
+            </Show>
           </StyledCardContent>
         </Show>
         <Show when={!props.isMinimized()}>

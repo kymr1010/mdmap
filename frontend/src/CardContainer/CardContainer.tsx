@@ -39,6 +39,7 @@ export interface CardContainerProps {
   cardRelations: Accessor<CardRelation[]>;
   setCardRelations: Setter<CardRelation[]>;
   setEdittingCard: Setter<Card | null>;
+  canEdit: Accessor<boolean>;
   // Optional: id to reveal/center on canvas
   revealCardId?: Accessor<number | null>;
   // Optional: allow container to request a reveal (e.g., from URL)
@@ -77,6 +78,7 @@ export const CardContainer = (props: CardContainerProps) => {
   const [nowTile, setNowTile] = createSignal<string>("0,0");
   const [minimized, setMinimized] = createSignal<Set<number>>(new Set());
   const [pageViewId, setPageViewId] = createSignal<number | null>(null);
+  const [pendingRevealId, setPendingRevealId] = createSignal<number | null>(null);
 
   // Compute a quick id->card map for lookups
   const cardMap = () => new Map(props.cards().map((c) => [c.id, c] as const));
@@ -152,14 +154,20 @@ export const CardContainer = (props: CardContainerProps) => {
   onMount(() => {
     const initial = parsePath();
     if (initial.kind === "view" && initial.id != null) setPageViewId(initial.id);
-    if (initial.kind === "page" && initial.id != null) props.onRequestReveal?.(initial.id);
+    if (initial.kind === "page" && initial.id != null) {
+      props.onRequestReveal?.(initial.id);
+      setPendingRevealId(initial.id);
+    }
     const handler = () => {
       const p = parsePath();
       if (p.kind === "view") {
         setPageViewId(p.id);
       } else if (p.kind === "page") {
         setPageViewId(null);
-        if (p.id != null) props.onRequestReveal?.(p.id);
+        if (p.id != null) {
+          props.onRequestReveal?.(p.id);
+          setPendingRevealId(p.id);
+        }
       } else {
         setPageViewId(null);
       }
@@ -171,11 +179,25 @@ export const CardContainer = (props: CardContainerProps) => {
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
     onUpCallback: async (fromID: Card["id"]) => {
+      if (!props.canEdit()) return;
+
       const parentConnPoint = nearestConnector();
       const childConnPoint = connectStartedConnector();
       console.log("onUpCallback", parentConnPoint);
 
-      if (!parentConnPoint || !childConnPoint) return;
+      if (!childConnPoint) return;
+
+      if (!parentConnPoint) {
+        try {
+          await createChildCardFromConnector(childConnPoint, fixedMousePosition());
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setConnectStartedConnector(null);
+          setNearestConnector(null);
+        }
+        return;
+      }
 
       const parentId = parentConnPoint.cardId;
       const childId = fromID;
@@ -218,13 +240,17 @@ export const CardContainer = (props: CardContainerProps) => {
         // Clear temp connector states
         setConnectStartedConnector(null);
         setNearestConnector(null);
-      });
+      }).catch(console.error);
     },
   });
 
-  const { onContextMenu, ContextMenu } = useContextMenu([
-    { label: "作成", action: () => addCard() },
-    { label: "作成", action: () => console.log("作成しました") },
+  const { onContextMenu, ContextMenu } = useContextMenu(() => [
+    ...(props.canEdit()
+      ? [
+          { label: "作成", action: () => addCard() },
+          { label: "作成", action: () => console.log("作成しました") },
+        ]
+      : []),
   ]);
 
   const [hoveredCard, setHoveredCard] = createSignal<Card | null>(null);
@@ -232,6 +258,92 @@ export const CardContainer = (props: CardContainerProps) => {
     createSignal<CardConnectorPoint | null>(null);
   const [nearestConnector, setNearestConnector] =
     createSignal<CardConnectorPoint | null>(null);
+
+  const oppositeDir = (dir: Dir): Dir => {
+    switch (dir) {
+      case "n":
+        return "s";
+      case "s":
+        return "n";
+      case "e":
+        return "w";
+      case "w":
+        return "e";
+    }
+  };
+
+  const getCardPositionFromConnectorPoint = (
+    point: Dimmension,
+    dir: Dir,
+    size: Dimmension
+  ): Dimmension => {
+    switch (dir) {
+      case "n":
+        return { x: point.x - size.x / 2, y: point.y };
+      case "s":
+        return { x: point.x - size.x / 2, y: point.y - size.y };
+      case "e":
+        return { x: point.x - size.x, y: point.y - size.y / 2 };
+      case "w":
+        return { x: point.x, y: point.y - size.y / 2 };
+    }
+  };
+
+  const createChildCardFromConnector = async (
+    parentConnPoint: CardConnectorPoint,
+    targetPoint: Dimmension
+  ) => {
+    const parentId = parentConnPoint.cardId;
+    const childDir = oppositeDir(parentConnPoint.dir);
+    const size = { x: 200, y: 200 };
+    const childAbs = getCardPositionFromConnectorPoint(targetPoint, childDir, size);
+    const parentAbs = getAbsPos(parentId);
+    const draftCard = {
+      id: 0,
+      position: childAbs,
+      size,
+      title: "",
+      contents: "",
+      parent_id: parentId,
+      tag_ids: [],
+    };
+
+    const created = await createCard(draftCard);
+    const childCard: Card = {
+      ...created,
+      parent_id: parentId,
+      position: {
+        x: childAbs.x - parentAbs.x,
+        y: childAbs.y - parentAbs.y,
+      },
+    };
+    const childConnPoint: CardConnectorPoint = {
+      cardId: created.id,
+      dir: childDir,
+    };
+    const connector: CardConnector = {
+      parent: parentConnPoint,
+      child: childConnPoint,
+      c: {
+        parent: parentConnPoint,
+        child: childConnPoint,
+      },
+    };
+
+    await connectCards(parentId, created.id, connector);
+    props.setCards((prev) => [...prev, childCard]);
+    props.setCardRelations((prev) => [
+      ...prev,
+      {
+        parent_id: parentId,
+        child_id: created.id,
+        connector,
+      },
+    ]);
+
+    const setter = posSetters.get(created.id);
+    if (setter) setter(childAbs);
+  };
 
   const currentTile = () => ({
     x: Math.floor((-position().x + window.innerWidth / 2) / scale() / tileSize),
@@ -323,13 +435,19 @@ export const CardContainer = (props: CardContainerProps) => {
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
 
-  // Center view on a given card id (when provided)
-  // Reacts also when cards are loaded later so initial deep link works.
+  // Track external reveal requests and center once when card data is available
+  createEffect(
+    on(
+      () => props.revealCardId?.(),
+      (id) => setPendingRevealId(id ?? null)
+    )
+  );
+
   createEffect(() => {
-    const id = props.revealCardId?.();
+    const id = pendingRevealId();
     if (!id) return;
     const card = cardMap().get(id);
-    if (!card) return;
+    if (!card) return; // wait until cards are loaded
     const abs = getAbsPos(id);
     const centerX = window.innerWidth / 2;
     const centerY = window.innerHeight / 2;
@@ -339,9 +457,13 @@ export const CardContainer = (props: CardContainerProps) => {
       x: Math.floor(centerX - scale() * targetX),
       y: Math.floor(centerY - scale() * targetY),
     });
+    // Clear so we don't re-center on unrelated state changes (like dragging)
+    setPendingRevealId(null);
   });
 
   const addCard = () => {
+    if (!props.canEdit()) return;
+
     const newCard = {
       id: 0,
       position: {
@@ -561,6 +683,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     isMinimized={() => isMinimized(id)}
                     onToggleMinimize={toggleMinimize}
                     onOpenPage={openPage}
+                    canEdit={props.canEdit}
                     setCard={(newCard) => {
                       // Ensure stored position remains relative to parent
                       const parentAbs = newCard.parent_id ? getAbsPos(newCard.parent_id) : { x: 0, y: 0 };

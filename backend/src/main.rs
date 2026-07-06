@@ -1,9 +1,11 @@
-use axum::Extension;
+use axum::{http::HeaderValue, Extension};
+use std::env;
 use std::net::SocketAddr;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 // mod config;
+mod auth;
 mod db;
 mod handlers;
 mod models;
@@ -17,17 +19,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // DB プール
     let pool = db::create_pool().await;
+    let auth_state = auth::AuthState::from_env();
 
     // CORS
+    let frontend_origin =
+        env::var("MEMOAPP_FRONTEND_ORIGIN").unwrap_or_else(|_| "http://localhost:5173".into());
+    let frontend_origin = HeaderValue::from_str(&frontend_origin)?;
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(frontend_origin)
         .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_headers(Any)
+        .allow_credentials(true);
 
     let trace = TraceLayer::new_for_http();
 
     // ルーター組み立て
-    let app = routes::router()
+    let app = routes::router(auth_state)
         .layer(cors)
         .layer(trace)
         .layer(Extension(pool));

@@ -3,12 +3,14 @@ import { createSignal, onCleanup, Show, Component } from "solid-js";
 import { Portal } from "solid-js/web";
 
 export type MenuItem = { label: string; action: () => void };
+type MenuItems = MenuItem[] | (() => MenuItem[]);
 
-export function useContextMenu(items: MenuItem[]) {
+export function useContextMenu(items: MenuItems) {
+  const getItems = () => (typeof items === "function" ? items() : items);
   const [menu, setMenu] = createSignal({
     x: 0,
     y: 0,
-    items,
+    items: getItems(),
   });
   const [visible, setVisible] = createSignal(false);
   let menuRef: HTMLElement | null = null;
@@ -16,8 +18,10 @@ export function useContextMenu(items: MenuItem[]) {
   const openMenu = (e: MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    const currentItems = getItems();
+    if (currentItems.length === 0) return;
     console.log();
-    setMenu({ x: e.clientX, y: e.clientY, items });
+    setMenu({ x: e.clientX, y: e.clientY, items: currentItems });
     setVisible(true);
     window.addEventListener("mousedown", handleWindowClick);
     window.addEventListener("keydown", onKeyDown);

@@ -1,3 +1,4 @@
+use crate::auth::{login, logout, require_write_auth, status, AuthState};
 use crate::handlers::card_card::{
     connect_card_to_card, disconnect_card_to_card, get_connectors, update_connector,
 };
@@ -5,12 +6,16 @@ use crate::handlers::cards::{
     create_card, delete_card, get_cards, get_cards_in_range, update_card,
 };
 use crate::handlers::tags::{create_tag, delete_tag, get_tags, update_tag};
+use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::Router;
 
-pub fn router() -> Router {
+pub fn router(auth_state: AuthState) -> Router {
     Router::new()
         .route("/", get(|| async { "Hello, World! 🎉" }))
+        .route("/auth/status", get(status))
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
         .route("/cards", get(get_cards))
         .route("/cards/in_range", get(get_cards_in_range))
         .route(
@@ -29,4 +34,6 @@ pub fn router() -> Router {
             "/tag",
             post(create_tag).patch(update_tag).delete(delete_tag),
         )
+        .layer(from_fn_with_state(auth_state.clone(), require_write_auth))
+        .with_state(auth_state)
 }

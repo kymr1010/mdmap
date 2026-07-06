@@ -1,6 +1,9 @@
 export const fetchAPI = async (url: string, options: RequestInit) => {
   console.log(url);
-  const res = await fetch(`http://localhost:8082/${url}`, options);
+  const res = await fetch(`http://localhost:8082/${url}`, {
+    credentials: "include",
+    ...options,
+  });
   const text = await res.text();
 
   if (!res.ok) {
