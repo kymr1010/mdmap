@@ -1,7 +1,10 @@
-use axum::{http::HeaderValue, Extension};
+use axum::{
+    http::{header::CONTENT_TYPE, HeaderValue, Method},
+    Extension,
+};
 use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 // mod config;
@@ -27,8 +30,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let frontend_origin = HeaderValue::from_str(&frontend_origin)?;
     let cors = CorsLayer::new()
         .allow_origin(frontend_origin)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([CONTENT_TYPE])
         .allow_credentials(true);
 
     let trace = TraceLayer::new_for_http();
@@ -41,7 +44,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // サーバ起動
     let addr = SocketAddr::from(([0, 0, 0, 0], 8082));
-    println!("Listening on {}", addr);
     println!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
