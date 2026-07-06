@@ -1,6 +1,7 @@
 export const fetchAPI = async (url: string, options: RequestInit) => {
   console.log(url);
-  const res = await fetch(`http://localhost:8082/${url}`, {
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8082").replace(/\/$/, "");
+  const res = await fetch(`${apiBaseUrl}/${url}`, {
     credentials: "include",
     ...options,
   });

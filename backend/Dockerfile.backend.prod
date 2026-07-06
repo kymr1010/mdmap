@@ -1,0 +1,27 @@
+FROM rust:1.96-bookworm AS builder
+
+WORKDIR /app
+
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release
+RUN rm -rf src target/release/deps/memoapp_backend*
+
+COPY src ./src
+RUN cargo build --release
+
+FROM debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --system --create-home --shell /usr/sbin/nologin memoapp
+
+COPY --from=builder /app/target/release/memoapp-backend /usr/local/bin/memoapp-backend
+
+USER memoapp
+EXPOSE 8082
+
+CMD ["memoapp-backend"]

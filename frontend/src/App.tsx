@@ -75,14 +75,11 @@ function App() {
         setCanEdit(false);
       });
 
-    const res = await fetch("http://localhost:8082/");
-    const text = await res.text();
     const rels = await getCardRelations();
     const fetched = await getCards();
     setCardRelations(rels);
     setCards(normalizeCardsToRelative(fetched));
     console.log(cardRelations());
-    console.log(text); // "Hello, World! 🎉"
     // init();
   });
 

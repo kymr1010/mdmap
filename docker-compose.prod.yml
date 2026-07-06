@@ -1,0 +1,41 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile.frontend.prod
+      args:
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend.prod
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASS}@mariadb:3306/${DB_NAME}
+      MEMOAPP_FRONTEND_ORIGIN: ${MEMOAPP_FRONTEND_ORIGIN}
+      MEMOAPP_ADMIN_PASSWORD: ${MEMOAPP_ADMIN_PASSWORD}
+      MEMOAPP_COOKIE_SECURE: ${MEMOAPP_COOKIE_SECURE:-false}
+    expose:
+      - "8082"
+    depends_on:
+      - mariadb
+
+  mariadb:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASS}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+
+volumes:
+  mariadb_data:
