@@ -18,7 +18,12 @@ export const createCard = async (card: Partial<Card>): Promise<Card> => {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ ...card, title }),
+    body: JSON.stringify({
+      ...card,
+      title,
+      visibility: card.visibility ?? "public",
+      card_type: card.card_type ?? "normal",
+    }),
   });
   // API returns { code, message, data }
   return res.data as Card;
@@ -32,7 +37,12 @@ export const updateCard = async (card: Card) => {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ ...card, title }),
+    body: JSON.stringify({
+      ...card,
+      title,
+      visibility: card.visibility ?? "public",
+      card_type: card.card_type ?? "normal",
+    }),
   });
 };
 

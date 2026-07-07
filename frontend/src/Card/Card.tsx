@@ -20,6 +20,7 @@ import { CSSProperties, style } from "@macaron-css/core";
 import { MenuItem, useContextMenu } from "../hooks/useContextMenu.js";
 import { Portal } from "solid-js/web";
 import { updateCard } from "../hooks/useCardAPI.js";
+import { extractFirstH1 } from "../utils/markdown.js";
 import { EditorPanel } from "../EditorPanel/EditorPanel.jsx";
 import { CardConnector, CardConnectorPoint } from "../schema/Connrctor.js";
 import { inputManager } from "../input/manager";
@@ -50,6 +51,8 @@ export interface CardProps {
   onUpdateCard?: (card: Card) => void;
   onDelete?: (id: number) => void;
   onDisconnectFromParent?: (id: number) => void;
+  /** Create a new card inside this card (used by frame cards). */
+  onCreateCard?: () => void;
 }
 
 export const CardElm = (props: CardProps) => {
@@ -63,8 +66,53 @@ export const CardElm = (props: CardProps) => {
   const [contents, setContents] = createSignal(props.card().contents);
   const [isEditing, setIsEditing] = createSignal(false);
   const [isHovered, setIsHovered] = createSignal(false);
+  const isFrame = () => props.card().card_type === "frame";
+
+  // --- Inline content editing (double-click a card to edit its raw text) ---
+  const [inlineEditing, setInlineEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal("");
+
+  const startInlineEdit = () => {
+    if (inlineEditing()) return; // already editing; don't reset the draft
+    if (!props.canEdit() || isFrame() || props.isMinimized()) return;
+    setDraft(props.card().contents ?? "");
+    setInlineEditing(true);
+  };
+
+  const persistContents = (newContents: string) => {
+    if (newContents === (props.card().contents ?? "")) return; // no change
+    setContents(newContents);
+    const derivedTitle = extractFirstH1(newContents) ?? "";
+    const updated: Card = {
+      ...props.card(),
+      contents: newContents,
+      title: derivedTitle,
+      // send absolute position; container converts to relative + persists
+      position: props.nodePosition(),
+    };
+    if (props.onUpdateCard) props.onUpdateCard(updated);
+    else updateCard(updated);
+  };
+
+  // Idempotent exit: the first call wins, so a keyboard-commit followed by the
+  // resulting blur won't double-persist.
+  const exitInlineEdit = (commit: boolean) => {
+    if (!inlineEditing()) return;
+    const d = draft();
+    setInlineEditing(false);
+    if (commit) persistContents(d);
+  };
 
   const menuItems = (): MenuItem[] => [
+    // Frames act as a canvas region: allow creating a child card inside them.
+    ...(props.canEdit() && isFrame()
+      ? [
+          {
+            label: "カード作成",
+            action: () => props.onCreateCard?.(),
+          } as MenuItem,
+        ]
+      : []),
     { label: "コピー", action: () => console.log("コピーしました") },
     { label: "最小化/復元", action: () => props.onToggleMinimize(props.card().id) },
     { label: "ページ表示", action: () => props.onOpenPage(props.card().id) },
@@ -172,6 +220,8 @@ export const CardElm = (props: CardProps) => {
     // Depend on contents so effect re-runs when markdown changes
     contents();
     if (props.isMinimized()) return;
+    if (isFrame()) return; // frames render no markdown content / H1
+    if (inlineEditing()) return; // no markdown/H1 while editing raw text
     useDrag({
       ref: () => (contentRef ? (contentRef.querySelector("h1") as HTMLElement | null) : null),
       getPos: props.nodePosition,
@@ -272,24 +322,98 @@ export const CardElm = (props: CardProps) => {
           // top: `${pos().y}px`,
           width: `${size().x}px`,
           height: props.isMinimized() ? undefined : `${size().y}px`,
+          ...(isFrame()
+            ? {
+                // Frame (領域): large transparent bordered box behind normal cards
+                background: "rgba(0,0,0,0.02)",
+                border: "2px dashed #9aa0a6",
+                "box-shadow": "none",
+                "z-index": 400,
+              }
+            : {}),
         }}
-        macaronHover={isHovered() ? "hover" : undefined}
+        macaronHover={!isFrame() && isHovered() ? "hover" : undefined}
       >
         <StyledCardHeader ref={(el) => (ref = el)} class="card-header">
-          {props.isMinimized() && (
-            <div style={{ fontWeight: 600, overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
+          <Show when={props.isMinimized() || isFrame()}>
+            <div
+              class={isFrame() ? "frame-title" : undefined}
+              style={
+                isFrame()
+                  ? {
+                      display: "inline-block",
+                      "font-weight": 600,
+                      padding: "2px 8px",
+                      background: "rgba(255,255,255,0.85)",
+                      "border-radius": "4px",
+                      "max-width": "100%",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                      "white-space": "nowrap",
+                    }
+                  : { fontWeight: 600, overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }
+              }
+            >
               {props.card().title || "(untitled)"}
             </div>
-          )}
+          </Show>
         </StyledCardHeader>
         <Show when={!props.isMinimized()}>
           <StyledCardContent>
-            <div ref={(el) => (contentRef = el)}>
+            <Show when={!isFrame()}>
               <div
-                class="markdown-body"
-                innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
-              ></div>
-            </div>
+                ref={(el) => (contentRef = el)}
+                style={{ height: "100%" }}
+                onDblClick={startInlineEdit}
+              >
+                <Show
+                  when={inlineEditing()}
+                  fallback={
+                    <div
+                      class="markdown-body"
+                      innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
+                    ></div>
+                  }
+                >
+                  <textarea
+                    ref={(el) => {
+                      // Uncontrolled: seed once, then track via onInput (no caret jumps).
+                      el.value = draft();
+                      requestAnimationFrame(() => el.focus());
+                    }}
+                    onInput={(e) => setDraft(e.currentTarget.value)}
+                    onBlur={() => exitInlineEdit(true)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        exitInlineEdit(false);
+                      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        exitInlineEdit(true);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      "box-sizing": "border-box",
+                      resize: "none",
+                      border: "none",
+                      outline: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      "font-family": "monospace",
+                      "font-size": "13px",
+                      "line-height": 1.5,
+                      "white-space": "pre-wrap",
+                      // The card disables selection/touch; re-enable them here.
+                      "user-select": "text",
+                      "-webkit-user-select": "text",
+                      "touch-action": "auto",
+                    }}
+                  />
+                </Show>
+              </div>
+            </Show>
             <Show when={props.canEdit()}>
               {dirs.map((dir) => (
                 <div
@@ -315,7 +439,7 @@ export const CardElm = (props: CardProps) => {
             </Show>
           </StyledCardContent>
         </Show>
-        <Show when={!props.isMinimized()}>
+        <Show when={!props.isMinimized() && !isFrame()}>
           <StyledCardFooter>
             <p> {props.card().id} -&gt; {props.card().parent_id}</p>
             <p>{props.card().created_at}</p>

@@ -4,6 +4,14 @@ use sqlx::FromRow;
 
 use crate::schema::Dimmension;
 
+fn default_visibility() -> String {
+    "public".to_string()
+}
+
+fn default_card_type() -> String {
+    "normal".to_string()
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Card {
     pub id: i64,
@@ -13,6 +21,10 @@ pub struct Card {
     pub contents: String,
     pub parent_id: Option<i64>,
     pub tag_ids: Vec<i64>,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    #[serde(default = "default_card_type")]
+    pub card_type: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -26,6 +38,10 @@ pub struct CardParams {
     pub contents: String,
     pub parent_id: Option<i64>,
     pub tag_ids: Vec<i64>,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    #[serde(default = "default_card_type")]
+    pub card_type: String,
 }
 
 #[derive(FromRow)]
@@ -39,6 +55,8 @@ pub struct CardRow {
     pub contents: String,
     pub parent_id: Option<i64>,
     pub tag_ids: serde_json::Value,
+    pub visibility: String,
+    pub card_type: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -60,6 +78,8 @@ impl From<CardRow> for Card {
             },
             parent_id: r.parent_id,
             tag_ids,
+            visibility: r.visibility,
+            card_type: r.card_type,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

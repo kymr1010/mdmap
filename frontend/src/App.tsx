@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 // import init from "@memo-app/wasm";
 import { CardContainer } from "./CardContainer/CardContainer.jsx";
 import { globalStyle } from "@macaron-css/core";
@@ -50,8 +50,13 @@ function App() {
   const [authError, setAuthError] = createSignal("");
   const [showLoginControls, setShowLoginControls] = createSignal(false);
   const sidebarWidth = 280;
-  const [sidebarOpen, setSidebarOpen] = createSignal(true);
+  const [sidebarOpen, setSidebarOpen] = createSignal(false);
   const effectiveSidebarWidth = () => (sidebarOpen() ? sidebarWidth : 0);
+
+  // Viewers (not authenticated) only see public cards. Admins see everything.
+  const displayCards = createMemo(() =>
+    canEdit() ? cards() : cards().filter((c) => c.visibility !== "private"),
+  );
 
   // NodeTree removed for simplicity; render from cards directly
 
@@ -126,67 +131,16 @@ function App() {
         position: "relative",
       }}
     >
-      <Show when={canEdit() || showLoginControls()}>
-        <div
-          style={{
-            position: "fixed",
-            top: "12px",
-            right: "12px",
-            "z-index": 3000,
-            display: "flex",
-            gap: "8px",
-            "align-items": "center",
-            padding: "8px",
-            background: "rgba(255,255,255,0.92)",
-            border: "1px solid #ddd",
-            "border-radius": "6px",
-            "box-shadow": "0 2px 8px rgba(0,0,0,0.12)",
-          }}
-        >
-          <Show
-            when={canEdit()}
-            fallback={
-              <Show
-                when={authEnabled() && showLoginControls()}
-                fallback={<span style={{ "font-size": "12px" }}>閲覧モード</span>}
-              >
-                <form
-                  onSubmit={handleLogin}
-                  style={{
-                    display: "flex",
-                    gap: "6px",
-                    "align-items": "center",
-                  }}
-                >
-                  <input
-                    type="password"
-                    value={password()}
-                    onInput={(e) => setPassword(e.currentTarget.value)}
-                    placeholder="編集パスワード"
-                    style={{
-                      width: "140px",
-                      padding: "4px 6px",
-                      border: "1px solid #ccc",
-                      "border-radius": "4px",
-                    }}
-                  />
-                  <button type="submit">ログイン</button>
-                  <Show when={authError()}>
-                    <span style={{ color: "#b00020", "font-size": "12px" }}>
-                      {authError()}
-                    </span>
-                  </Show>
-                </form>
-              </Show>
-            }
-          >
-            <span style={{ "font-size": "12px" }}>編集モード</span>
-            <button onClick={handleLogout}>ログアウト</button>
-          </Show>
-        </div>
-      </Show>
       <SideCardTree
-        cards={cards}
+        cards={displayCards}
+        canEdit={canEdit}
+        authEnabled={authEnabled}
+        showLoginControls={showLoginControls}
+        password={password}
+        setPassword={setPassword}
+        authError={authError}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
         onReveal={(id) => {
           setRevealCardId(id);
           try {
@@ -204,7 +158,7 @@ function App() {
       />
       <CardContainer
         position={{ x: 0, y: 0 }}
-        cards={cards}
+        cards={displayCards}
         setCards={setCards}
         cardRelations={cardRelations}
         setCardRelations={setCardRelations}

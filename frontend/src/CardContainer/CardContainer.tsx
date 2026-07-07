@@ -26,11 +26,13 @@ import {
   CardConnectorPoint,
   Path,
 } from "../schema/Connrctor.js";
-import { connectCards, disconnectCards } from "../hooks/useConnectAPI.js";
+import { attachChildToParent, connectCards, disconnectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
 import { CardElm } from "../Card/Card.jsx";
 import { getAbsPosFromMap } from "../utils/position.js";
 import { PageView } from "../PageView/PageView.jsx";
+import { inputManager } from "../input/manager.js";
+import { createLongPressContextMenu } from "../input/gestures.js";
 
 export interface CardContainerProps {
   position: Dimmension;
@@ -58,7 +60,7 @@ export const CardContainer = (props: CardContainerProps) => {
 
   const ZOOM = {
     MAX: 5,
-    MIN: -5,
+    MIN: -10,
     FACTOR: 1.25,
   };
 
@@ -81,6 +83,7 @@ export const CardContainer = (props: CardContainerProps) => {
   const [pageViewId, setPageViewId] = createSignal<number | null>(null);
   const [pendingRevealId, setPendingRevealId] = createSignal<number | null>(null);
   const touchPointers = new Map<number, Dimmension>();
+  const longPress = createLongPressContextMenu();
   let pinchStart:
     | {
         distance: number;
@@ -493,13 +496,21 @@ export const CardContainer = (props: CardContainerProps) => {
     });
   };
 
+  const scrollPointers = () => inputManager.scrollPointers();
+
   const handlePointerDown = (event: PointerEvent) => {
     if (event.pointerType !== "touch") return;
     touchPointers.set(event.pointerId, {
       x: event.clientX,
       y: event.clientY,
     });
-    if (touchPointers.size === 2) {
+    // Single touch: arm long-press (touch equivalent of right click)
+    if (touchPointers.size === 1) {
+      longPress.onDown(event);
+    }
+    // Multi-touch gesture: scroll / zoom the canvas
+    if (touchPointers.size >= scrollPointers()) {
+      longPress.cancel();
       event.preventDefault();
       startPinch();
     }
@@ -511,6 +522,7 @@ export const CardContainer = (props: CardContainerProps) => {
       x: event.clientX,
       y: event.clientY,
     });
+    longPress.onMove(event);
     if (isPinching()) {
       event.preventDefault();
       updatePinch();
@@ -519,8 +531,9 @@ export const CardContainer = (props: CardContainerProps) => {
 
   const handlePointerEnd = (event: PointerEvent) => {
     if (event.pointerType !== "touch") return;
+    longPress.onEnd();
     touchPointers.delete(event.pointerId);
-    if (touchPointers.size < 2) {
+    if (touchPointers.size < scrollPointers()) {
       pinchStart = null;
       setIsPinching(false);
     } else {
@@ -534,7 +547,13 @@ export const CardContainer = (props: CardContainerProps) => {
       getPos: position,
       setPos: setPosition,
       scaleFactor: () => 1,
-      startGuard: () => touchPointers.size < 2 && !isPinching(),
+      // Allow the pan to start on any descendant (e.g. a card's non-text area),
+      // not just the bare container background.
+      strictTarget: false,
+      startGuard: (e, el) =>
+        touchPointers.size < scrollPointers() &&
+        !isPinching() &&
+        inputManager.canStartCanvasPan({ root: el, event: e }),
       continueGuard: () => !isPinching(),
     }); // Container のスクロールは zoomLevel の範疇外なので factor は 1
   });
@@ -565,15 +584,36 @@ export const CardContainer = (props: CardContainerProps) => {
     setPendingRevealId(null);
   });
 
-  const addCard = () => {
+  // Innermost frame card whose area contains the given absolute point (if any).
+  const findContainingFrame = (p: Dimmension): Card | undefined => {
+    const containing = props
+      .cards()
+      .filter((c) => c.card_type === "frame")
+      .filter((f) => {
+        const a = getAbsPos(f.id);
+        return (
+          p.x >= a.x && p.x <= a.x + f.size.x && p.y >= a.y && p.y <= a.y + f.size.y
+        );
+      });
+    // Prefer the smallest (innermost) frame when frames are nested.
+    containing.sort((a, b) => a.size.x * a.size.y - b.size.x * b.size.y);
+    return containing[0];
+  };
+
+  const addCard = (frameOverride?: Card) => {
     if (!props.canEdit()) return;
+
+    const dropAbs = {
+      x: fixedMousePosition().x,
+      y: fixedMousePosition().y,
+    };
+    // If the card is dropped inside a frame (or created from a frame's menu),
+    // it becomes that frame's child.
+    const frame = frameOverride ?? findContainingFrame(dropAbs);
 
     const newCard = {
       id: 0,
-      position: {
-        x: fixedMousePosition().x,
-        y: fixedMousePosition().y,
-      },
+      position: dropAbs,
       size: {
         x: 200,
         y: 200,
@@ -585,31 +625,66 @@ export const CardContainer = (props: CardContainerProps) => {
     console.log(newCard);
     createCard(newCard)
       .then((created) => {
-        // Append created card immediately
-        props.setCards((prev) => [...prev, created]);
-        // Register live position for connectors immediately
-        // If maps exist, seed with absolute position
-        const abs = created.position; // parent_id is null => absolute
-        const setter = posSetters.get(created.id);
-        if (setter) setter(abs);
+        // created.position is absolute (no parent relation yet)
+        if (frame) {
+          const frameAbs = getAbsPos(frame.id);
+          const childCard: Card = {
+            ...created,
+            parent_id: frame.id,
+            position: {
+              x: created.position.x - frameAbs.x,
+              y: created.position.y - frameAbs.y,
+            },
+          };
+          props.setCards((prev) => [...prev, childCard]);
+          // Containment relation: establishes parent_id but draws no line.
+          props.setCardRelations((prev) => [
+            ...prev,
+            { parent_id: frame.id, child_id: created.id, connector: null },
+          ]);
+          const setter = posSetters.get(created.id);
+          if (setter) setter(created.position);
+          attachChildToParent(frame.id, created.id).catch(console.error);
+        } else {
+          props.setCards((prev) => [...prev, created]);
+          const setter = posSetters.get(created.id);
+          if (setter) setter(created.position);
+        }
       })
       .catch(console.error);
   };
 
   const handleScroll = (event: WheelEvent) => {
-    event.preventDefault();
+    const action = inputManager.resolveWheelAction({ when: "canvas", event });
 
-    const delta = event.deltaY > 0 ? 1 : -1;
-    if (zoomLevel() + delta > ZOOM.MAX || zoomLevel() + delta < ZOOM.MIN)
-      return;
-
-    setScaleAroundScreenPoint(
-      Math.pow(ZOOM.FACTOR, zoomLevel() + delta),
-      {
+    // Ctrl + wheel / trackpad pinch => zoom around the cursor (continuous).
+    if (action === "view.zoom") {
+      event.preventDefault();
+      // Clamp per-event delta so a chunky mouse notch and a fine trackpad pinch
+      // both feel reasonable, then map it to a multiplicative scale factor.
+      const dy = Math.max(-25, Math.min(25, event.deltaY));
+      const factor = Math.exp(-dy * 0.01);
+      setScaleAroundScreenPoint(scale() * factor, {
         x: event.clientX,
         y: event.clientY,
-      }
-    );
+      });
+      return;
+    }
+
+    // Plain wheel / two-finger trackpad scroll => pan the canvas.
+    if (action === "view.scroll") {
+      event.preventDefault();
+      const next = {
+        x: Math.floor(position().x - event.deltaX),
+        y: Math.floor(position().y - event.deltaY),
+      };
+      setPosition(next);
+      setMousePosition({
+        x: event.clientX - next.x,
+        y: event.clientY - next.y,
+      });
+      return;
+    }
   };
 
   const addCardRelation = (
@@ -732,6 +807,47 @@ export const CardContainer = (props: CardContainerProps) => {
     };
   };
 
+  // Frames whose own top-left title has scrolled off-screen while the frame is
+  // still (partly) visible. The sticky title is pinned to the nearest viewport
+  // edge but keeps tracking the frame title's real X (when clipped at the top)
+  // or Y (when clipped at the left), so it stays aligned with the frame.
+  const STICKY_MARGIN = 8;
+  const stickyFrameTitles = createMemo(() => {
+    const pos = position();
+    const s = scale();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    return props
+      .cards()
+      .filter((c) => c.card_type === "frame" && isCardVisible(c.id))
+      .map((f) => {
+        const a = getAbsPos(f.id);
+        return {
+          id: f.id,
+          title: f.title || "(untitled)",
+          screenX: pos.x + a.x * s,
+          screenY: pos.y + a.y * s,
+          w: f.size.x * s,
+          h: f.size.y * s,
+        };
+      })
+      // frame currently intersects the viewport ...
+      .filter(
+        (r) =>
+          r.screenX < vw && r.screenX + r.w > 0 && r.screenY < vh && r.screenY + r.h > 0
+      )
+      // ... but its in-canvas title (top-left) is scrolled past the top/left edge
+      .filter((r) => r.screenY < 0 || r.screenX < 0)
+      .map((r) => ({
+        id: r.id,
+        title: r.title,
+        // Clamp to the viewport: clipped-at-top -> pin to top (top=margin) but
+        // keep the real X; clipped-at-left -> pin to left but keep the real Y.
+        left: clamp(r.screenX, STICKY_MARGIN, vw - STICKY_MARGIN),
+        top: clamp(r.screenY, STICKY_MARGIN, vh - STICKY_MARGIN),
+      }));
+  });
+
   return (
     <>
       <StyledCardContainer
@@ -795,6 +911,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     isMinimized={() => isMinimized(id)}
                     onToggleMinimize={toggleMinimize}
                     onOpenPage={openPage}
+                    onCreateCard={() => addCard(cardAcc())}
                     canEdit={props.canEdit}
                     setCard={(newCard) => {
                       // Ensure stored position remains relative to parent
@@ -954,37 +1071,71 @@ export const CardContainer = (props: CardContainerProps) => {
           onNavigate={(id) => openPage(id)}
         />
       </Show>
+      {/* Sticky frame titles: pinned to the viewport edge while tracking the
+          frame title's real X/Y for frames scrolled past their own title. */}
+      <For each={stickyFrameTitles()}>
+        {(t) => (
+          <div
+            style={{
+              position: "fixed",
+              left: `${t.left}px`,
+              top: `${t.top}px`,
+              "z-index": 1500,
+              "pointer-events": "none",
+              background: "rgba(30,30,30,0.85)",
+              color: "#fff",
+              padding: "4px 10px",
+              "border-radius": "6px",
+              "font-weight": 600,
+              "font-size": "13px",
+              "max-width": "40vw",
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
+              "white-space": "nowrap",
+            }}
+          >
+            {t.title}
+          </div>
+        )}
+      </For>
+      {/* Canvas indicators (bottom-right): block coord, fine coord, zoom slider */}
       <div
-        class={style({
-          position: "absolute",
-          left: 0,
-          top: 0,
-          // pointerEvents: "none",
-        })}
+        style={{
+          position: "fixed",
+          right: "12px",
+          bottom: "12px",
+          "z-index": 1500,
+          display: "flex",
+          "flex-direction": "column",
+          "align-items": "flex-end",
+          gap: "4px",
+          padding: "8px 10px",
+          background: "rgba(255,255,255,0.85)",
+          border: "1px solid #ddd",
+          "border-radius": "6px",
+          "font-size": "12px",
+          color: "#333",
+          "box-shadow": "0 2px 8px rgba(0,0,0,0.12)",
+        }}
       >
-        <p>{nowTile()}</p>
-        <p>
-          {position().x},{position().y}
-        </p>
-        <p>
-          {mousePosition().x},{mousePosition().y}
-        </p>
-        <p>
-          {fixedMousePosition().x},{fixedMousePosition().y}
-        </p>
-        <input type="range" min={ZOOM.MIN} max={ZOOM.MAX} value={zoomLevel()} />
-        <label>
-          ZOOM: {zoomLevel()} SCALE: {scale()}
-        </label>
-        <p>
-          {connectStartedConnector()?.cardId},{connectStartedConnector()?.dir},
-          {nearestConnector()?.dir},{nearestConnector()?.cardId}
-        </p>
-        <p>{JSON.stringify(nowCardConnectPath())}</p>
-        <p>{currentLine()?.from.x}</p>
-        
-        <button onClick={() => console.log(props.cards())}>cards</button>
-        <button onClick={() => console.log(props.cardRelations())}>conn</button>
+        <div>{nowTile()}</div>
+        <div>
+          {position().x}, {position().y}
+        </div>
+        <input
+          type="range"
+          min={ZOOM.MIN}
+          max={ZOOM.MAX}
+          step={1}
+          value={zoomLevel()}
+          onInput={(e) => {
+            const level = Number(e.currentTarget.value);
+            setScaleAroundScreenPoint(Math.pow(ZOOM.FACTOR, level), {
+              x: window.innerWidth / 2,
+              y: window.innerHeight / 2,
+            });
+          }}
+        />
       </div>
       <ContextMenu />
     </>

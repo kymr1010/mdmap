@@ -5,3 +5,4 @@ wasm/target
 pkg
 .pnpm-store
 .env
+.DS_Store

@@ -1,4 +1,5 @@
 import { styled } from "@macaron-css/solid";
+import { globalStyle } from "@macaron-css/core";
 import EasyMDE from "easymde";
 import {
   Accessor,
@@ -21,6 +22,41 @@ type EditorPanelProps = {
   onSave: (card: CardProps) => void;
   onCancel: () => void;
 };
+
+// Render the editor as plain text: neutralize the Markdown token styling that
+// EasyMDE / CodeMirror applies (headers, bold, emphasis, links, quotes...), so
+// the edit form shows raw Markdown without any visual formatting.
+const CM_MARKDOWN_TOKENS = [
+  ".cm-header",
+  ".cm-header-1",
+  ".cm-header-2",
+  ".cm-header-3",
+  ".cm-header-4",
+  ".cm-header-5",
+  ".cm-header-6",
+  ".cm-strong",
+  ".cm-em",
+  ".cm-quote",
+  ".cm-link",
+  ".cm-url",
+  ".cm-image",
+  ".cm-strikethrough",
+  ".cm-comment",
+  ".cm-formatting",
+]
+  .map((t) => `.EasyMDEContainer .CodeMirror ${t}`)
+  .join(", ");
+
+globalStyle(CM_MARKDOWN_TOKENS, {
+  fontSize: "inherit !important",
+  fontWeight: "inherit !important",
+  fontStyle: "normal !important",
+  fontFamily: "inherit !important",
+  lineHeight: "inherit !important",
+  color: "inherit !important",
+  textDecoration: "none !important",
+  background: "none !important",
+});
 
 export const EditorPanel = (props: EditorPanelProps) => {
   let ref = undefined as HTMLTextAreaElement | undefined;
@@ -142,6 +178,54 @@ export const EditorPanel = (props: EditorPanelProps) => {
             }
           }}
         />
+      </div>
+      <div style={{ "margin-bottom": "1rem" }}>
+        <label>
+          公開範囲
+          <select
+            value={props.card()?.visibility ?? "public"}
+            onChange={(e) => {
+              const c = props.card();
+              if (!c) return;
+              props.setCard({
+                ...c,
+                visibility: e.currentTarget.value as CardProps["visibility"],
+              });
+            }}
+            style={{
+              display: "block",
+              "margin-top": "0.25rem",
+              padding: "4px 6px",
+            }}
+          >
+            <option value="public">公開（全員に表示）</option>
+            <option value="private">非公開（管理者のみ）</option>
+          </select>
+        </label>
+      </div>
+      <div style={{ "margin-bottom": "1rem" }}>
+        <label>
+          カード種別
+          <select
+            value={props.card()?.card_type ?? "normal"}
+            onChange={(e) => {
+              const c = props.card();
+              if (!c) return;
+              props.setCard({
+                ...c,
+                card_type: e.currentTarget.value as CardProps["card_type"],
+              });
+            }}
+            style={{
+              display: "block",
+              "margin-top": "0.25rem",
+              padding: "4px 6px",
+            }}
+          >
+            <option value="normal">通常カード</option>
+            <option value="frame">枠（領域内に作成したカードを子にする）</option>
+          </select>
+        </label>
       </div>
       <button
         onClick={() => {

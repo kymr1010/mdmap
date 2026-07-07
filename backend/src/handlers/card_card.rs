@@ -1,11 +1,22 @@
+use crate::auth::AuthState;
 use crate::models::{ApiResponse, CardCardParams, CardRelation};
-use axum::{http::StatusCode, response::IntoResponse, Extension, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Extension, Json,
+};
 use serde_json::json;
 use sqlx::{MySql, Pool};
+use std::collections::HashSet;
 
 pub async fn get_connectors(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
     Extension(pool): Extension<Pool<sqlx::MySql>>,
 ) -> ApiResponse<Vec<CardRelation>> {
+    let authed = auth.is_authenticated(&headers);
+
     let rows = sqlx::query_as::<_, CardRelation>(
         r#"
       select c.card_parent_id, c.card_child_id, c.connector, c.created_at, c.updated_at
@@ -23,8 +34,27 @@ pub async fn get_connectors(
         }
     };
 
+    // For unauthenticated viewers, drop any connector that references a private
+    // card so private cards can't be inferred from the relation graph.
+    let private_ids: HashSet<i64> = if authed {
+        HashSet::new()
+    } else {
+        match sqlx::query_scalar::<_, i64>("SELECT id FROM cards WHERE visibility = 'private'")
+            .fetch_all(&pool)
+            .await
+        {
+            Ok(ids) => ids.into_iter().collect(),
+            Err(e) => return ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        }
+    };
+
     let connectors: Vec<CardRelation> = rows
         .into_iter()
+        .filter(|r| {
+            authed
+                || (!private_ids.contains(&r.card_parent_id)
+                    && !private_ids.contains(&r.card_child_id))
+        })
         .map(|r| CardRelation {
             card_parent_id: r.card_parent_id,
             card_child_id: r.card_child_id,

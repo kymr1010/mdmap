@@ -1,16 +1,40 @@
 use crate::{
+    auth::AuthState,
     db::{fetch_all_card_rows, fetch_card_row_by_id, fetch_card_rows_in_range},
     models::{ApiResponse, Card, CardParams},
     schema::RangeParams,
 };
-use axum::{extract::Query, http::StatusCode, response::IntoResponse, Extension, Json};
+use axum::{
+    extract::{Query, State},
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Extension, Json,
+};
 use serde_json::json;
 use sqlx::{MySql, Pool};
 
-pub async fn get_cards(Extension(pool): Extension<Pool<sqlx::MySql>>) -> ApiResponse<Vec<Card>> {
+/// Visibility value that must never be exposed to unauthenticated viewers.
+const VISIBILITY_PRIVATE: &str = "private";
+
+/// Whether a viewer with the given auth state may see a card of `visibility`.
+fn can_view(authed: bool, visibility: &str) -> bool {
+    authed || visibility != VISIBILITY_PRIVATE
+}
+
+pub async fn get_cards(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Extension(pool): Extension<Pool<sqlx::MySql>>,
+) -> ApiResponse<Vec<Card>> {
+    let authed = auth.is_authenticated(&headers);
     match fetch_all_card_rows(&pool).await {
         Ok(rows) => {
-            let cards = rows.into_iter().map(Card::from).collect();
+            // Private cards are never sent to unauthenticated viewers.
+            let cards = rows
+                .into_iter()
+                .map(Card::from)
+                .filter(|c| can_view(authed, &c.visibility))
+                .collect();
             ApiResponse::new_ok(StatusCode::OK, cards)
         }
         Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -18,15 +42,22 @@ pub async fn get_cards(Extension(pool): Extension<Pool<sqlx::MySql>>) -> ApiResp
 }
 
 pub async fn get_cards_in_range(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
     Extension(pool): Extension<Pool<MySql>>,
     Query(params): Query<RangeParams>,
 ) -> ApiResponse<Vec<Card>> {
+    let authed = auth.is_authenticated(&headers);
     // WKT ポリゴンを作成
     let poly = create_poly(params.min_x, params.min_y, params.max_x, params.max_y);
 
     match fetch_card_rows_in_range(&pool, &poly).await {
         Ok(rows) => {
-            let cards = rows.into_iter().map(Card::from).collect();
+            let cards = rows
+                .into_iter()
+                .map(Card::from)
+                .filter(|c| can_view(authed, &c.visibility))
+                .collect();
             ApiResponse::new_ok(StatusCode::OK, cards)
         }
         Err(e) => ApiResponse::new_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -48,13 +79,15 @@ pub async fn create_card(
 
     let res = sqlx::query(
         r#"
-        INSERT INTO cards (shape, title, contents)
-        VALUES (ST_GeomFromText(?), ?, ?)
+        INSERT INTO cards (shape, title, contents, visibility, card_type)
+        VALUES (ST_GeomFromText(?), ?, ?, ?, ?)
     "#,
     )
     .bind(&poly)
     .bind(&params.title)
     .bind(&params.contents)
+    .bind(&params.visibility)
+    .bind(&params.card_type)
     .execute(&mut *tx)
     .await;
 
@@ -118,14 +151,16 @@ pub async fn update_card(
 
     let result = sqlx::query(
         r#"
-        UPDATE cards 
-        SET shape = ST_GeomFromText(?), title = ?, contents = ?
+        UPDATE cards
+        SET shape = ST_GeomFromText(?), title = ?, contents = ?, visibility = ?, card_type = ?
         WHERE id = ?
     "#,
     )
     .bind(&poly)
     .bind(&params.title)
     .bind(&params.contents)
+    .bind(&params.visibility)
+    .bind(&params.card_type)
     .bind(&params.id)
     .execute(&mut *tx)
     .await;

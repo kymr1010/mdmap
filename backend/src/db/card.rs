@@ -8,7 +8,7 @@ SELECT
     ST_Y(ST_PointN(ST_ExteriorRing(shape), 1)) AS pos_y,
     (ST_X(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_X(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_x,
     (ST_Y(ST_PointN(ST_ExteriorRing(shape), 3)) - ST_Y(ST_PointN(ST_ExteriorRing(shape), 1))) AS size_y,
-    c.id, c.title, c.contents, c.created_at, c.updated_at, cc.card_parent_id AS parent_id,
+    c.id, c.title, c.contents, c.visibility, c.card_type, c.created_at, c.updated_at, cc.card_parent_id AS parent_id,
     COALESCE(JSON_ARRAYAGG(ct.tag_id), JSON_ARRAY()) AS tag_ids,
     COALESCE(JSON_ARRAYAGG(JSON_OBJECT('id', cc.card_child_id)), JSON_ARRAY()) AS card_ids
 FROM cards c
@@ -22,7 +22,7 @@ where
     E: Executor<'e, Database = MySql>,
 {
     let sql = format!(
-        "{} GROUP BY c.id, c.title, c.contents, c.created_at, c.updated_at, pos_x, pos_y, size_x, size_y",
+        "{} GROUP BY c.id, c.title, c.contents, c.visibility, c.card_type, c.created_at, c.updated_at, pos_x, pos_y, size_x, size_y",
         SELECT_CARD_ROWS
     );
     sqlx::query_as::<_, CardRow>(&sql).fetch_all(executor).await
@@ -38,7 +38,7 @@ where
 {
     let sql = format!(
         "{} WHERE MBRIntersects(shape, ST_GeomFromText(?)) \
-         GROUP BY c.id, c.title, c.contents,c.created_at, c.updated_at, pos_x, pos_y, size_x, size_y",
+         GROUP BY c.id, c.title, c.contents, c.visibility, c.card_type, c.created_at, c.updated_at, pos_x, pos_y, size_x, size_y",
         SELECT_CARD_ROWS
     );
     sqlx::query_as::<_, CardRow>(&sql)

@@ -1,9 +1,13 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     env,
     sync::{Arc, Mutex},
 };
 
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Algorithm, Argon2, Params, Version,
+};
 use axum::{
     extract::{Request, State},
     http::{
@@ -12,20 +16,31 @@ use axum::{
     },
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
 use rand::{distr::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use sqlx::{MySql, Pool};
 
-use crate::models::ApiResponse;
+use crate::models::{ApiResponse, UserRow};
 
 const SESSION_COOKIE: &str = "memoapp_session";
 
+/// Who a session belongs to. Kept for future per-user / per-role features.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct SessionUser {
+    pub user_id: i64,
+    pub role: String,
+}
+
 #[derive(Clone)]
 pub struct AuthState {
-    admin_password: Option<String>,
-    sessions: Arc<Mutex<HashSet<String>>>,
+    sessions: Arc<Mutex<HashMap<String, SessionUser>>>,
     cookie_secure: bool,
+    /// Optional server-side secret ("pepper") mixed into every password hash.
+    /// Lives only in the environment, never in the database.
+    pepper: Vec<u8>,
 }
 
 #[derive(Deserialize)]
@@ -41,36 +56,75 @@ pub struct AuthStatus {
 
 impl AuthState {
     pub fn from_env() -> Self {
-        let admin_password = env::var("MEMOAPP_ADMIN_PASSWORD")
-            .ok()
-            .filter(|password| !password.is_empty());
         let cookie_secure = env::var("MEMOAPP_COOKIE_SECURE")
             .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
             .unwrap_or(false);
+        let pepper = env::var("MEMOAPP_PASSWORD_PEPPER")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(|value| value.into_bytes())
+            .unwrap_or_default();
 
         Self {
-            admin_password,
-            sessions: Arc::new(Mutex::new(HashSet::new())),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
             cookie_secure,
+            pepper,
         }
     }
 
-    fn auth_enabled(&self) -> bool {
-        self.admin_password.is_some()
+    /// Argon2 instance, keyed with the pepper when one is configured.
+    fn argon2(&self) -> Argon2<'_> {
+        if self.pepper.is_empty() {
+            Argon2::default()
+        } else {
+            Argon2::new_with_secret(&self.pepper, Algorithm::Argon2id, Version::V0x13, Params::default())
+                .expect("invalid argon2 configuration (pepper too long?)")
+        }
     }
 
-    fn is_authenticated(&self, headers: &HeaderMap) -> bool {
+    /// Hash a plaintext password into an argon2 PHC string (with per-user salt).
+    pub fn hash_password(&self, password: &str) -> Result<String, String> {
+        let salt = SaltString::generate(&mut OsRng);
+        self.argon2()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|hash| hash.to_string())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Verify a plaintext password against a stored argon2 PHC string.
+    fn verify_password(&self, password: &str, hash: &str) -> bool {
+        match PasswordHash::new(hash) {
+            Ok(parsed) => self
+                .argon2()
+                .verify_password(password.as_bytes(), &parsed)
+                .is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    pub fn is_authenticated(&self, headers: &HeaderMap) -> bool {
         let Some(token) = session_token_from_headers(headers) else {
             return false;
         };
 
         self.sessions
             .lock()
-            .map(|sessions| sessions.contains(token))
+            .map(|sessions| sessions.contains_key(token))
             .unwrap_or(false)
     }
 
-    fn create_session(&self) -> String {
+    /// The user behind the current session, if any. Reserved for future
+    /// per-user / role-based authorization.
+    #[allow(dead_code)]
+    pub fn current_user(&self, headers: &HeaderMap) -> Option<SessionUser> {
+        let token = session_token_from_headers(headers)?;
+        self.sessions
+            .lock()
+            .ok()
+            .and_then(|sessions| sessions.get(token).cloned())
+    }
+
+    fn create_session(&self, user: SessionUser) -> String {
         let token: String = rand::rng()
             .sample_iter(&Alphanumeric)
             .take(64)
@@ -78,7 +132,7 @@ impl AuthState {
             .collect();
 
         if let Ok(mut sessions) = self.sessions.lock() {
-            sessions.insert(token.clone());
+            sessions.insert(token.clone(), user);
         }
 
         token
@@ -107,37 +161,98 @@ impl AuthState {
     }
 }
 
+/// Ensure an admin user exists. On first run, if MEMOAPP_ADMIN_PASSWORD is set
+/// and there is no `admin` user yet, create one with a hashed password. This
+/// migrates the bootstrap password from the environment into the database;
+/// afterwards the DB is the source of truth (the env value is only used to seed).
+pub async fn bootstrap_admin(pool: &Pool<MySql>, state: &AuthState) -> Result<(), String> {
+    let Some(password) = env::var("MEMOAPP_ADMIN_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE username = 'admin'")
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if existing.is_some() {
+        return Ok(());
+    }
+
+    let hash = state.hash_password(&password)?;
+    sqlx::query("INSERT INTO users (username, password_hash, role) VALUES ('admin', ?, 'admin')")
+        .bind(&hash)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    println!("bootstrapped 'admin' user from MEMOAPP_ADMIN_PASSWORD");
+    Ok(())
+}
+
+/// True when at least one active user exists (i.e. login is possible).
+async fn auth_enabled(pool: &Pool<MySql>) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE is_active = TRUE")
+        .fetch_one(pool)
+        .await
+        .map(|count| count > 0)
+        .unwrap_or(false)
+}
+
 pub async fn status(
     State(state): State<AuthState>,
+    Extension(pool): Extension<Pool<MySql>>,
     headers: HeaderMap,
 ) -> ApiResponse<AuthStatus> {
     ApiResponse::new_ok(
         StatusCode::OK,
         AuthStatus {
             authenticated: state.is_authenticated(&headers),
-            auth_enabled: state.auth_enabled(),
+            auth_enabled: auth_enabled(&pool).await,
         },
     )
 }
 
 pub async fn login(
     State(state): State<AuthState>,
+    Extension(pool): Extension<Pool<MySql>>,
     Json(params): Json<LoginParams>,
 ) -> Response {
-    let Some(admin_password) = state.admin_password.as_ref() else {
-        return ApiResponse::<AuthStatus>::new_err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "admin password is not configured",
-        )
-        .into_response();
+    // Password-only login: match the submitted password against each active
+    // user's hash to identify who is logging in.
+    let users = match sqlx::query_as::<_, UserRow>(
+        "SELECT id, username, password_hash, role FROM users WHERE is_active = TRUE",
+    )
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(users) => users,
+        Err(e) => {
+            return ApiResponse::<AuthStatus>::new_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e.to_string(),
+            )
+            .into_response();
+        }
     };
 
-    if params.password != *admin_password {
+    let matched = users
+        .into_iter()
+        .find(|user| state.verify_password(&params.password, &user.password_hash));
+
+    let Some(user) = matched else {
         return ApiResponse::<AuthStatus>::new_err(StatusCode::UNAUTHORIZED, "invalid password")
             .into_response();
-    }
+    };
 
-    let token = state.create_session();
+    let token = state.create_session(SessionUser {
+        user_id: user.id,
+        role: user.role,
+    });
+
     let mut response = ApiResponse::new_ok(
         StatusCode::OK,
         AuthStatus {
@@ -154,13 +269,17 @@ pub async fn login(
     response
 }
 
-pub async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+pub async fn logout(
+    State(state): State<AuthState>,
+    Extension(pool): Extension<Pool<MySql>>,
+    headers: HeaderMap,
+) -> Response {
     state.remove_session(&headers);
     let mut response = ApiResponse::new_ok(
         StatusCode::OK,
         AuthStatus {
             authenticated: false,
-            auth_enabled: state.auth_enabled(),
+            auth_enabled: auth_enabled(&pool).await,
         },
     )
     .into_response();
@@ -185,12 +304,11 @@ pub async fn require_write_auth(
         return next.run(req).await;
     }
 
-    if state.auth_enabled() && state.is_authenticated(req.headers()) {
+    if state.is_authenticated(req.headers()) {
         return next.run(req).await;
     }
 
-    ApiResponse::<()>::new_err(StatusCode::UNAUTHORIZED, "authentication required")
-        .into_response()
+    ApiResponse::<()>::new_err(StatusCode::UNAUTHORIZED, "authentication required").into_response()
 }
 
 fn session_token_from_headers(headers: &HeaderMap) -> Option<&str> {

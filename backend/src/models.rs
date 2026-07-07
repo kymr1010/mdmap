@@ -9,3 +9,6 @@ pub use card_card::{CardCardParams, CardRelation};
 
 mod response;
 pub use response::ApiResponse;
+
+mod user;
+pub use user::UserRow;

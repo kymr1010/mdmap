@@ -24,6 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::create_pool().await;
     sqlx::migrate!("./migrations").run(&pool).await?;
     let auth_state = auth::AuthState::from_env();
+    // Seed the admin user from MEMOAPP_ADMIN_PASSWORD on first run.
+    auth::bootstrap_admin(&pool, &auth_state).await?;
 
     // CORS
     let frontend_origin =

@@ -48,6 +48,12 @@ export function useDrag(props: {
 
   let origin: Dimmension = { x: 0, y: 0 };
   let beforePos: Dimmension = { x: 0, y: 0 };
+  // Pointer capture is deferred until the press actually becomes a drag, so
+  // plain clicks / double-clicks on descendants are not swallowed.
+  let captured = false;
+  let activePointerId: number | null = null;
+  let startClient: Dimmension = { x: 0, y: 0 };
+  const DRAG_THRESHOLD = 4; // px of movement before a press counts as a drag
 
   const onPointerDown = (e: PointerEvent) => {
     // 重なっている要素への伝播を止める
@@ -60,11 +66,11 @@ export function useDrag(props: {
       if (!(e.target instanceof Node) || !el.contains(e.target)) return;
     }
     if (props.startGuard && !props.startGuard(e, el)) return;
-    // e.stopPropagation();
-    // e.preventDefault();
 
-    // この要素にポインタをキャプチャ（ムーブ／アップもこの要素で受ける）
-    el.setPointerCapture(e.pointerId);
+    // まだキャプチャしない（ドラッグ確定まで待つ）
+    captured = false;
+    activePointerId = e.pointerId;
+    startClient = { x: e.clientX, y: e.clientY };
 
     // 位置を記憶
     beforePos = props.getPos();
@@ -85,6 +91,18 @@ export function useDrag(props: {
   const onPointerMove = (e: PointerEvent) => {
     if (props.continueGuard && !props.continueGuard()) return;
 
+    if (!captured) {
+      const moved = Math.hypot(e.clientX - startClient.x, e.clientY - startClient.y);
+      if (moved < DRAG_THRESHOLD) return; // まだクリック相当。ドラッグではない
+      // ここで初めてキャプチャ（ムーブ／アップをこの要素で受ける）
+      if (el && activePointerId !== null) {
+        try {
+          el.setPointerCapture(activePointerId);
+        } catch {}
+      }
+      captured = true;
+    }
+
     // 計算済みの新しい位置（origin を差し引く）
     const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
     const next = {
@@ -104,7 +122,16 @@ export function useDrag(props: {
   const onPointerUp = (e: PointerEvent) => {
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
-    if (props.upCallback !== undefined) {
+    const wasDragging = captured;
+    if (el && captured) {
+      try {
+        el.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
+    captured = false;
+    activePointerId = null;
+    // 実際にドラッグした場合のみコミット（クリックでは発火しない）
+    if (wasDragging && props.upCallback !== undefined) {
       const off = props.getClientOffset?.() ?? { x: 0, y: 0 };
       const next = {
         x: Math.floor((e.clientX - off.x) / props.scaleFactor() - origin.x),
@@ -115,7 +142,6 @@ export function useDrag(props: {
         y: next.y - beforePos.y,
       });
     }
-    if (el) el.releasePointerCapture(e.pointerId);
   };
 
   // 初期アタッチ（ref が未設定でも再試行）

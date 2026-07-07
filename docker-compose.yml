@@ -7,13 +7,15 @@ services:
       dockerfile: ./frontend/Dockerfile.frontend
     ports:
       - "5173:5173"
+    env_file:
+      - .env
     volumes:
       - ./frontend:/app/frontend
       - frontend_node_modules:/app/frontend/node_modules
+      - ./.env:/app/.env
   backend:
     environment:
-      DB_HOST: ${DB_HOST}
-      DB_PORT: ${DB_PORT}
+      DATABASE_URL: mysql://${DB_USER}:${DB_PASS}@mariadb:3306/${DB_NAME}
     build:
       context: ./backend
       dockerfile: Dockerfile.backend.dev

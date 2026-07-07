@@ -9,6 +9,15 @@ type SideCardTreeProps = {
   open?: boolean;
   onClose?: () => void;
   onOpen?: () => void;
+  // Auth controls (rendered inside the sidebar)
+  canEdit?: Accessor<boolean>;
+  authEnabled?: Accessor<boolean>;
+  showLoginControls?: Accessor<boolean>;
+  password?: Accessor<string>;
+  setPassword?: (value: string) => void;
+  authError?: Accessor<string>;
+  onLogin?: (event: Event) => void;
+  onLogout?: () => void;
 };
 
 type TreeItem = Card & { children: TreeItem[] };
@@ -44,6 +53,49 @@ export const SideCardTree = (props: SideCardTreeProps) => {
           <ScrollArea>
             <TreeList items={tree()} level={0} onReveal={(id) => { setSelectedId(id); props.onReveal(id); }} selectedId={selectedId} />
           </ScrollArea>
+          {/* Only admins, or visitors who arrived with the secret login query,
+              ever see this section. Plain viewers get no hint that an edit mode
+              exists at all. */}
+          <Show when={props.canEdit?.() || (props.authEnabled?.() && props.showLoginControls?.())}>
+            <AuthSection>
+              <Show
+                when={props.canEdit?.()}
+                fallback={
+                  <form
+                    onSubmit={(e) => props.onLogin?.(e)}
+                    style={{ display: "flex", "flex-direction": "column", gap: "6px" }}
+                  >
+                    <input
+                      type="password"
+                      value={props.password?.() ?? ""}
+                      onInput={(e) => props.setPassword?.(e.currentTarget.value)}
+                      placeholder="編集パスワード"
+                      style={{
+                        width: "100%",
+                        padding: "6px 8px",
+                        border: "1px solid #3a3a3a",
+                        "border-radius": "4px",
+                        background: "#2a2a2a",
+                        color: "#eee",
+                        "box-sizing": "border-box",
+                      }}
+                    />
+                    <button type="submit">ログイン</button>
+                    <Show when={props.authError?.()}>
+                      <span style={{ color: "#ff6b6b", "font-size": "12px" }}>
+                        {props.authError?.()}
+                      </span>
+                    </Show>
+                  </form>
+                }
+              >
+                <StatusRow>
+                  <StatusText>編集モード</StatusText>
+                  <button onClick={() => props.onLogout?.()}>ログアウト</button>
+                </StatusRow>
+              </Show>
+            </AuthSection>
+          </Show>
         </Sidebar>
       </Wrapper>
       <Show when={!props.open}>
@@ -153,6 +205,30 @@ const ScrollArea = styled("div", {
   base: {
     overflow: "auto",
     flex: 1,
+  },
+});
+
+const AuthSection = styled("div", {
+  base: {
+    padding: "10px",
+    borderTop: "1px solid #2a2a2a",
+    fontSize: "13px",
+  },
+});
+
+const StatusRow = styled("div", {
+  base: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+  },
+});
+
+const StatusText = styled("span", {
+  base: {
+    fontSize: "12px",
+    color: "#9aa0a6",
   },
 });
 

@@ -10,13 +10,41 @@ export const getCardRelations: () => Promise<CardRelation[]> = async () => {
   });
   const data = res.data;
   console.log(data);
+  const parseConnector = (raw: any): CardConnector | null => {
+    try {
+      const parsed = raw ? JSON.parse(raw) : null;
+      // A containment relation stores `null`; only treat objects as line connectors.
+      return parsed && typeof parsed === "object" ? (parsed as CardConnector) : null;
+    } catch {
+      return null;
+    }
+  };
   return data.map(
     (item: any): CardRelation => ({
       parent_id: item.card_parent_id,
       child_id: item.card_child_id,
-      connector: JSON.parse(item.connector),
+      connector: parseConnector(item.connector),
     })
   );
+};
+
+// Create a "containment" relation (frame parent -> child) that establishes the
+// parent/child link but draws no connector line (connector stored as null).
+export const attachChildToParent = async (
+  parentId: Card["id"],
+  childId: Card["id"]
+) => {
+  await fetchAPI("cards_connect", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      card_parent_id: parentId,
+      card_child_id: childId,
+      connector: JSON.stringify(null),
+    }),
+  });
 };
 
 export const connectCards = async (
