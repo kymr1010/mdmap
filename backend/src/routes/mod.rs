@@ -5,6 +5,7 @@ use crate::handlers::card_card::{
 use crate::handlers::cards::{
     create_card, delete_card, get_cards, get_cards_in_range, update_card,
 };
+use crate::handlers::flash_card::{get_flash_cards_by_tag, post_flash_card_result};
 use crate::handlers::tags::{create_tag, delete_tag, get_tags, update_tag};
 use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
@@ -18,6 +19,10 @@ pub fn router(auth_state: AuthState) -> Router {
         .route("/auth/logout", post(logout))
         .route("/cards", get(get_cards))
         .route("/cards/in_range", get(get_cards_in_range))
+        .route(
+            "/cards/flush_json",
+            get(get_flash_cards_by_tag).post(post_flash_card_result),
+        )
         .route(
             "/cards_connect",
             get(get_connectors)

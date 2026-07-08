@@ -1,0 +1,2 @@
+ALTER TABLE cards
+  ADD COLUMN ok_count INT NOT NULL DEFAULT 0;
