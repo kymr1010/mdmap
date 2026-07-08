@@ -1,18 +1,25 @@
-import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 // import init from "@memo-app/wasm";
 import { CardContainer } from "./CardContainer/CardContainer.jsx";
 import { globalStyle } from "@macaron-css/core";
 import { EditorPanel } from "./EditorPanel/EditorPanel.jsx";
-import { Card } from "./schema/Card.js";
+import { Card, Dir } from "./schema/Card.js";
 import { getCards, updateCard } from "./hooks/useCardAPI.js";
 import {
   normalizeCardsToRelative,
-  getAbsPos,
   buildCardMap,
   getAbsPosFromMap,
 } from "./utils/position.js";
-import { getCardRelations } from "./hooks/useConnectAPI.js";
+import {
+  attachChildToParent,
+  connectCards,
+  disconnectCards,
+  getCardRelations,
+  updateCardConnector,
+} from "./hooks/useConnectAPI.js";
 import { CardRelation } from "./schema/CardRelation.js";
+import { CardConnector } from "./schema/Connrctor.js";
+import { Dimmension } from "./schema/Point.js";
 // import { DataCheck } from "./DataCheck/DataCheck.jsx";
 import SideCardTree from "./SideCardTree/SideCardTree.jsx";
 import { getAuthStatus, login, logout } from "./hooks/useAuthAPI.js";
@@ -44,6 +51,10 @@ function App() {
   const [cards, setCards] = createSignal<Card[]>([]);
   const [cardRelations, setCardRelations] = createSignal<CardRelation[]>([]);
   const [revealCardId, setRevealCardId] = createSignal<number | null>(null);
+  const [canvasMousePosition, setCanvasMousePosition] = createSignal<Dimmension>({
+    x: 0,
+    y: 0,
+  });
   const [canEdit, setCanEdit] = createSignal(false);
   const [authEnabled, setAuthEnabled] = createSignal(true);
   const [password, setPassword] = createSignal("");
@@ -51,7 +62,152 @@ function App() {
   const [showLoginControls, setShowLoginControls] = createSignal(false);
   const sidebarWidth = 280;
   const [sidebarOpen, setSidebarOpen] = createSignal(false);
-  const effectiveSidebarWidth = () => (sidebarOpen() ? sidebarWidth : 0);
+
+  const connectorPoint = (card: Card, abs: Dimmension, dir: Dir): Dimmension => {
+    switch (dir) {
+      case "n":
+        return { x: abs.x + card.size.x / 2, y: abs.y };
+      case "s":
+        return { x: abs.x + card.size.x / 2, y: abs.y + card.size.y };
+      case "e":
+        return { x: abs.x + card.size.x, y: abs.y + card.size.y / 2 };
+      case "w":
+        return { x: abs.x, y: abs.y + card.size.y / 2 };
+    }
+  };
+
+  const nearestConnector = (
+    parent: Card,
+    parentAbs: Dimmension,
+    child: Card,
+    childAbs: Dimmension,
+  ): CardConnector => {
+    const dirs: Dir[] = ["n", "s", "e", "w"];
+    let best = {
+      parentDir: "n" as Dir,
+      childDir: "s" as Dir,
+      distance: Number.POSITIVE_INFINITY,
+    };
+
+    for (const parentDir of dirs) {
+      const parentPoint = connectorPoint(parent, parentAbs, parentDir);
+      for (const childDir of dirs) {
+        const childPoint = connectorPoint(child, childAbs, childDir);
+        const d = Math.hypot(parentPoint.x - childPoint.x, parentPoint.y - childPoint.y);
+        if (d < best.distance) best = { parentDir, childDir, distance: d };
+      }
+    }
+
+    const parentPoint = { cardId: parent.id, dir: best.parentDir };
+    const childPoint = { cardId: child.id, dir: best.childDir };
+    return {
+      parent: parentPoint,
+      child: childPoint,
+      c: {
+        parent: parentPoint,
+        child: childPoint,
+      },
+    };
+  };
+
+  const persistConnector = async (
+    relation: CardRelation,
+    connector: CardConnector | null,
+  ) => {
+    try {
+      await updateCardConnector(relation.parent_id, relation.child_id, connector);
+    } catch (e) {
+      console.error(e);
+      await disconnectCards(relation.parent_id, relation.child_id);
+      if (connector) {
+        await connectCards(relation.parent_id, relation.child_id, connector);
+      } else {
+        await attachChildToParent(relation.parent_id, relation.child_id);
+      }
+    }
+  };
+
+  const handleFrameTypeConversion = async (
+    card: Card,
+    previousCard?: Card,
+  ): Promise<boolean> => {
+    const previousType = previousCard?.card_type ?? "normal";
+    const nextType = card.card_type ?? "normal";
+    if (previousType === nextType) return false;
+
+    const directRelations = cardRelations().filter((r) => r.parent_id === card.id);
+    const map = buildCardMap(cards());
+
+    if (nextType === "frame") {
+      const abs = getAbsPosFromMap(map, card.id);
+      await updateCard({ ...card, position: abs });
+      setCardRelations((prev) =>
+        prev.map((r) => (r.parent_id === card.id ? { ...r, connector: null } : r)),
+      );
+      await Promise.all(directRelations.map((r) => persistConnector(r, null)));
+      return true;
+    }
+
+    if (previousType === "frame" && nextType === "normal") {
+      const childAbsById = new Map(
+        directRelations.map((r) => [r.child_id, getAbsPosFromMap(map, r.child_id)] as const),
+      );
+      const newParentAbs = { ...canvasMousePosition() };
+      const parentOfParentAbs =
+        card.parent_id != null ? getAbsPosFromMap(map, card.parent_id) : { x: 0, y: 0 };
+      const movedParent: Card = {
+        ...card,
+        position: {
+          x: newParentAbs.x - parentOfParentAbs.x,
+          y: newParentAbs.y - parentOfParentAbs.y,
+        },
+      };
+      const connectors = new Map<Card["id"], CardConnector>();
+
+      for (const relation of directRelations) {
+        const child = map.get(relation.child_id);
+        const childAbs = childAbsById.get(relation.child_id);
+        if (!child || !childAbs) continue;
+        connectors.set(
+          relation.child_id,
+          nearestConnector(movedParent, newParentAbs, child, childAbs),
+        );
+      }
+
+      setCards((prev) =>
+        prev.map((c) => {
+          if (c.id === card.id) return movedParent;
+          const childAbs = childAbsById.get(c.id);
+          if (!childAbs) return c;
+          return {
+            ...c,
+            position: {
+              x: childAbs.x - newParentAbs.x,
+              y: childAbs.y - newParentAbs.y,
+            },
+          };
+        }),
+      );
+      setCardRelations((prev) =>
+        prev.map((r) =>
+          r.parent_id === card.id
+            ? { ...r, connector: connectors.get(r.child_id) ?? r.connector }
+            : r,
+        ),
+      );
+
+      await updateCard({ ...movedParent, position: newParentAbs });
+      await Promise.all(
+        directRelations.map((r) => {
+          const connector = connectors.get(r.child_id);
+          return connector ? persistConnector(r, connector) : Promise.resolve();
+        }),
+      );
+      return true;
+    }
+
+    return false;
+  };
 
   // Viewers (not authenticated) only see public cards. Admins see everything.
   const displayCards = createMemo(() =>
@@ -166,6 +322,7 @@ function App() {
         canEdit={canEdit}
         revealCardId={revealCardId}
         onRequestReveal={(id) => setRevealCardId(id)}
+        onMouseWorldPositionChange={setCanvasMousePosition}
       />
       <Show when={canEdit()}>
         <EditorPanel
@@ -179,10 +336,13 @@ function App() {
               });
             });
           }}
-          onSave={(card) => {
+          onSave={async (card, previousCard) => {
             // Persist edits to DB using absolute position
-            const abs = getAbsPosFromMap(buildCardMap(cards()), card.id);
-            updateCard({ ...card, position: abs });
+            const handledConversion = await handleFrameTypeConversion(card, previousCard);
+            if (!handledConversion) {
+              const abs = getAbsPosFromMap(buildCardMap(cards()), card.id);
+              await updateCard({ ...card, position: abs });
+            }
             setEdittingCard(null);
           }}
           onCancel={() => setEdittingCard(null)}

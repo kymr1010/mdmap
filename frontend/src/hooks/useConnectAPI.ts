@@ -73,6 +73,24 @@ export const connectCards = async (
   console.log(res.body);
 };
 
+export const updateCardConnector = async (
+  parentId: Card["id"],
+  childId: Card["id"],
+  connector: CardConnector | null
+) => {
+  await fetchAPI("cards_connect", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      card_parent_id: parentId,
+      card_child_id: childId,
+      connector: JSON.stringify(connector),
+    }),
+  });
+};
+
 export const disconnectCards = async (
   parentId: Card["id"],
   childId: Card["id"]

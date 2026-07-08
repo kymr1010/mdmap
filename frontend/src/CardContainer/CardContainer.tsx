@@ -42,6 +42,7 @@ export interface CardContainerProps {
   setCardRelations: Setter<CardRelation[]>;
   setEdittingCard: Setter<Card | null>;
   canEdit: Accessor<boolean>;
+  onMouseWorldPositionChange?: (position: Dimmension) => void;
   // Optional: id to reveal/center on canvas
   revealCardId?: Accessor<number | null>;
   // Optional: allow container to request a reveal (e.g., from URL)
@@ -71,6 +72,10 @@ export const CardContainer = (props: CardContainerProps) => {
   const fixedMousePosition = () => ({
     x: Math.floor(mousePosition().x / scale()),
     y: Math.floor(mousePosition().y / scale()),
+  });
+
+  createEffect(() => {
+    props.onMouseWorldPositionChange?.(fixedMousePosition());
   });
 
   const [position, setPosition] = createSignal<Dimmension>({

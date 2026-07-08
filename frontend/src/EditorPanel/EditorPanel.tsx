@@ -19,7 +19,7 @@ import { getTags, createTag as apiCreateTag } from "../hooks/useTagAPI.js";
 type EditorPanelProps = {
   card: Accessor<CardProps | null>;
   setCard: (card: CardProps) => void;
-  onSave: (card: CardProps) => void;
+  onSave: (card: CardProps, previousCard?: CardProps) => void | Promise<void>;
   onCancel: () => void;
 };
 
@@ -231,7 +231,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
         onClick={() => {
           console.log(props.card());
           props.setCard(props.card()!);
-          props.onSave(props.card()!);
+          props.onSave(props.card()!, initialCard());
           setInitialCard(undefined);
           setIsOpen(false);
         }}
@@ -241,7 +241,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
       <button
         onClick={() => {
           props.setCard(initialCard()!);
-          props.onSave(initialCard()!);
+          props.onSave(initialCard()!, initialCard());
           props.onCancel();
           setInitialCard(undefined);
           setIsOpen(false);
