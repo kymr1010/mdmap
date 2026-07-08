@@ -16,6 +16,8 @@ import { Card, Dir } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
 import { createCard, getCards, updateCard } from "../hooks/useCardAPI.js";
 import { deleteCard as deleteCardAPI } from "../hooks/useCardAPI.js";
@@ -30,6 +32,7 @@ import { attachChildToParent, connectCards, disconnectCards } from "../hooks/use
 import { CardRelation } from "../schema/CardRelation.js";
 import { CardElm } from "../Card/Card.jsx";
 import { getAbsPosFromMap } from "../utils/position.js";
+import { extractFirstH1 } from "../utils/markdown.js";
 import { PageView } from "../PageView/PageView.jsx";
 import { inputManager } from "../input/manager.js";
 import { createLongPressContextMenu } from "../input/gestures.js";
@@ -87,6 +90,11 @@ export const CardContainer = (props: CardContainerProps) => {
   const [minimized, setMinimized] = createSignal<Set<number>>(new Set());
   const [pageViewId, setPageViewId] = createSignal<number | null>(null);
   const [pendingRevealId, setPendingRevealId] = createSignal<number | null>(null);
+  const [hiddenLinkedCardIds, setHiddenLinkedCardIds] = createSignal<Set<number>>(new Set());
+  const [linkPreview, setLinkPreview] = createSignal<{
+    cardId: Card["id"];
+    position: Dimmension;
+  } | null>(null);
   const touchPointers = new Map<number, Dimmension>();
   const longPress = createLongPressContextMenu();
   let pinchStart:
@@ -108,6 +116,7 @@ export const CardContainer = (props: CardContainerProps) => {
 
   // Minimize helpers
   const isCardVisible = (id: number) => {
+    if (hiddenLinkedCardIds().has(id)) return false;
     // visible if no ancestor is minimized
     const map = cardMap();
     let cur = map.get(id);
@@ -305,6 +314,88 @@ export const CardContainer = (props: CardContainerProps) => {
       case "w":
         return { x: point.x, y: point.y - size.y / 2 };
     }
+  };
+
+  const screenToWorld = (point: Dimmension): Dimmension => ({
+    x: Math.floor((point.x - position().x) / scale()),
+    y: Math.floor((point.y - position().y) / scale()),
+  });
+
+  const replaceFirstNewCardLink = (contents: string, cardId: Card["id"]) =>
+    contents.replace("/card/new", `/card/${cardId}`);
+
+  const openLinkedCardPreview = async (
+    sourceCardId: Card["id"],
+    href: string,
+    screenPosition: Dimmension
+  ) => {
+    const previewPosition = {
+      x: screenToWorld(screenPosition).x + 16,
+      y: screenToWorld(screenPosition).y + 16,
+    };
+
+    if (href === "/card/new") {
+      if (!props.canEdit()) return;
+      const source = cardMap().get(sourceCardId);
+      if (!source) return;
+
+      const sourceAbs = getAbsPos(sourceCardId);
+      const draftCard = {
+        id: 0,
+        position: previewPosition,
+        size: { x: 260, y: 180 },
+        title: "",
+        contents: "",
+        parent_id: sourceCardId,
+        tag_ids: [],
+      };
+
+      try {
+        const created = await createCard(draftCard);
+        const childCard: Card = {
+          ...created,
+          parent_id: sourceCardId,
+          position: {
+            x: previewPosition.x - sourceAbs.x,
+            y: previewPosition.y - sourceAbs.y,
+          },
+        };
+        const nextSource: Card = {
+          ...source,
+          contents: replaceFirstNewCardLink(source.contents ?? "", created.id),
+        };
+
+        props.setCards((prev) =>
+          prev.map((c) => (c.id === sourceCardId ? nextSource : c)).concat(childCard)
+        );
+        props.setCardRelations((prev) => [
+          ...prev,
+          { parent_id: sourceCardId, child_id: created.id, connector: null },
+        ]);
+        setHiddenLinkedCardIds((prev) => new Set(prev).add(created.id));
+        setLinkPreview({
+          cardId: created.id,
+          position: previewPosition,
+        });
+
+        await attachChildToParent(sourceCardId, created.id);
+        await updateCard({ ...nextSource, position: sourceAbs });
+      } catch (e) {
+        console.error(e);
+      }
+      return;
+    }
+
+    const match = href.match(/^\/card\/(\d+)$/);
+    if (!match) return;
+    const cardId = Number(match[1]);
+    if (!Number.isFinite(cardId)) return;
+    const linkedCard = cardMap().get(cardId);
+    if (!linkedCard) return;
+    setLinkPreview({
+      cardId,
+      position: previewPosition,
+    });
   };
 
   const createChildCardFromConnector = async (
@@ -917,6 +1008,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     onToggleMinimize={toggleMinimize}
                     onOpenPage={openPage}
                     onCreateCard={() => addCard(cardAcc())}
+                    onCardLinkClick={openLinkedCardPreview}
                     canEdit={props.canEdit}
                     setCard={(newCard) => {
                       // Ensure stored position remains relative to parent
@@ -1026,6 +1118,44 @@ export const CardContainer = (props: CardContainerProps) => {
               );
             }}
           </For>
+          <Show when={linkPreview()}>
+            {(preview) => {
+              const previewCard = () => cardMap().get(preview().cardId);
+              return (
+                <Show when={previewCard()}>
+                  {(card) => (
+                    <LinkedCardPreview
+                      style={{
+                        left: `${preview().position.x}px`,
+                        top: `${preview().position.y}px`,
+                      }}
+                    >
+                      <PreviewHeader>
+                        <strong>
+                          {extractFirstH1(card().contents || "") ||
+                            card().title ||
+                            `Card ${card().id}`}
+                        </strong>
+                        <PreviewActions>
+                          <Show when={props.canEdit()}>
+                            <button onClick={() => props.setEdittingCard(card())}>編集</button>
+                          </Show>
+                          <button onClick={() => openPage(card().id)}>開く</button>
+                          <button onClick={() => setLinkPreview(null)}>閉じる</button>
+                        </PreviewActions>
+                      </PreviewHeader>
+                      <PreviewBody
+                        class="markdown-body"
+                        innerHTML={
+                          DOMPurify.sanitize(marked(card().contents || "")) || ""
+                        }
+                      />
+                    </LinkedCardPreview>
+                  )}
+                </Show>
+              );
+            }}
+          </Show>
           <svg
             class={style({
               position: "absolute",
@@ -1157,5 +1287,62 @@ const StyledCardContainer = styled("div", {
     backgroundImage:
       `linear-gradient(to right, var(--color-bg-border, #eee) 1px, transparent 1px),` +
       `linear-gradient(to bottom, var(--color-bg-border, #eee) 1px, transparent 1px)`,
+  },
+});
+
+const LinkedCardPreview = styled("div", {
+  base: {
+    position: "absolute",
+    zIndex: 1800,
+    width: "320px",
+    maxHeight: "360px",
+    overflow: "hidden",
+    background: "#fff",
+    border: "1px solid #d6d6d6",
+    borderRadius: "8px",
+    boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
+    padding: "10px 12px",
+    pointerEvents: "auto",
+  },
+});
+
+const PreviewHeader = styled("div", {
+  base: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    marginBottom: "8px",
+    "& strong": {
+      minWidth: 0,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    },
+  },
+});
+
+const PreviewActions = styled("div", {
+  base: {
+    display: "flex",
+    gap: "4px",
+    flexShrink: 0,
+    "& button": {
+      border: "1px solid #ddd",
+      background: "#f7f7f7",
+      borderRadius: "4px",
+      padding: "2px 6px",
+      cursor: "pointer",
+      fontSize: "12px",
+    },
+  },
+});
+
+const PreviewBody = styled("div", {
+  base: {
+    maxHeight: "300px",
+    overflow: "auto",
+    fontSize: "13px",
+    lineHeight: 1.55,
   },
 });

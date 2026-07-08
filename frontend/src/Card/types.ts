@@ -30,4 +30,9 @@ export interface CardProps {
   onDelete?: (id: number) => void;
   onDisconnectFromParent?: (id: number) => void;
   onCreateCard?: () => void;
+  onCardLinkClick?: (
+    sourceCardId: Card["id"],
+    href: string,
+    screenPosition: Dimmension
+  ) => void;
 }

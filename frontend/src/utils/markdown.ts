@@ -6,4 +6,3 @@ export function extractFirstH1(markdown: string): string | null {
   const m = re.exec(markdown);
   return m ? m[1].trim() : null;
 }
-

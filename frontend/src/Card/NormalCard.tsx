@@ -1,4 +1,4 @@
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
 import { Portal } from "solid-js/web";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -49,6 +49,10 @@ export const NormalCard = (props: CardProps) => {
     createCommonMenuItems(props)
   );
 
+  createEffect(() => {
+    if (!inlineEditing()) setContents(props.card().contents);
+  });
+
   useCommonCardInteractions(props, {
     cardRoot: () => cardRoot,
     dragHandle: () => headerRef,
@@ -83,6 +87,27 @@ export const NormalCard = (props: CardProps) => {
     const nextDraft = draft();
     setInlineEditing(false);
     if (commit) persistContents(nextDraft);
+  };
+
+  const renderedContents = () =>
+    DOMPurify.sanitize(marked(contents() || "") || "");
+
+  const handleMarkdownClick = (event: MouseEvent) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const link = target.closest("a");
+    if (!(link instanceof HTMLAnchorElement)) return;
+
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin) return;
+    if (!/^\/card\/(?:new|\d+)$/.test(url.pathname)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    props.onCardLinkClick?.(props.card().id, url.pathname, {
+      x: event.clientX,
+      y: event.clientY,
+    });
   };
 
   return (
@@ -131,7 +156,8 @@ export const NormalCard = (props: CardProps) => {
                 fallback={
                   <div
                     class="markdown-body"
-                    innerHTML={DOMPurify.sanitize(marked(contents() || "")) || ""}
+                    innerHTML={renderedContents()}
+                    onClick={handleMarkdownClick}
                   />
                 }
               >
