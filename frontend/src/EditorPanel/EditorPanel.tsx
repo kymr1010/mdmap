@@ -9,6 +9,7 @@ import {
   onMount,
   Setter,
   Show,
+  untrack,
 } from "solid-js";
 import { Card as CardProps } from "../schema/Card.js";
 import { extractFirstH1 } from "../utils/markdown.js";
@@ -65,6 +66,12 @@ export const EditorPanel = (props: EditorPanelProps) => {
   const [initialCard, setInitialCard] = createSignal<CardProps>();
   const [allTags, setAllTags] = createSignal<Tag[]>([]);
   const [selectedTagNames, setSelectedTagNames] = createSignal<string[]>([]);
+  const [isEditingTags, setIsEditingTags] = createSignal(false);
+
+  const tagNamesFromCard = (card: CardProps, tags: Tag[]) => {
+    const map = new Map(tags.map((t) => [t.id, t.name] as const));
+    return (card.tag_ids || []).map((id) => map.get(id)).filter(Boolean) as string[];
+  };
 
   createEffect(
     on(
@@ -75,9 +82,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
           setInitialCard(newCard);
           setIsOpen(true);
           easyMDE.value(newCard.contents);
-          // recompute selected tag names for this card
-          const map = new Map(allTags().map((t) => [t.id, t.name] as const));
-          setSelectedTagNames((newCard.tag_ids || []).map((id) => map.get(id)).filter(Boolean) as string[]);
+          setSelectedTagNames(tagNamesFromCard(newCard, allTags()));
         }
       }
     )
@@ -86,10 +91,10 @@ export const EditorPanel = (props: EditorPanelProps) => {
   // When tag list changes while an editor is open, recompute selected names
   createEffect(
     on(allTags, () => {
+      if (untrack(isEditingTags)) return;
       const c = props.card();
       if (!c) return;
-      const map = new Map(allTags().map((t) => [t.id, t.name] as const));
-      setSelectedTagNames((c.tag_ids || []).map((id) => map.get(id)).filter(Boolean) as string[]);
+      setSelectedTagNames(tagNamesFromCard(c, allTags()));
     })
   );
 
@@ -146,25 +151,28 @@ export const EditorPanel = (props: EditorPanelProps) => {
           initialTags={selectedTagNames()}
           enforceWhitelist={false}
           onChange={async (names) => {
+            setIsEditingTags(true);
             setSelectedTagNames(names);
             // map current list
             let nameToId = new Map(allTags().map((t) => [t.name, t.id] as const));
             const unknown = names.filter((n) => n.trim().length > 0 && !nameToId.has(n));
             if (unknown.length > 0) {
+              const createdTags: Tag[] = [];
               for (const n of unknown) {
                 try {
-                  await apiCreateTag(n);
+                  const created = await apiCreateTag(n);
+                  createdTags.push(created);
+                  nameToId.set(created.name, created.id);
                 } catch (e) {
                   console.error("createTag failed", e);
                 }
               }
-              // fetch fresh list and use it directly for mapping
-              try {
-                const updated = await getTags();
-                setAllTags(updated);
-                nameToId = new Map(updated.map((t) => [t.name, t.id] as const));
-              } catch (e) {
-                console.error("getTags failed", e);
+              if (createdTags.length > 0) {
+                setAllTags((prev) => {
+                  const byId = new Map(prev.map((t) => [t.id, t] as const));
+                  for (const tag of createdTags) byId.set(tag.id, tag);
+                  return Array.from(byId.values());
+                });
               }
             }
             const ids = names
@@ -176,6 +184,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
               const sameAll = sameLen && prevIds.every((v, i) => v === ids[i]);
               if (!sameAll) props.setCard({ ...props.card()!, tag_ids: ids });
             }
+            setIsEditingTags(false);
           }}
         />
       </div>

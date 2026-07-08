@@ -7,11 +7,11 @@ export const getTags = async (): Promise<Tag[]> => {
   return res as Tag[];
 };
 
-// Note: backend create_tag does not return the created row/id currently
-export const createTag = async (name: string): Promise<void> => {
-  await fetchAPI("tag", {
+export const createTag = async (name: string): Promise<Tag> => {
+  const res = await fetchAPI("tag", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: 0, name }),
   });
+  return res.data as Tag;
 };
