@@ -1,5 +1,8 @@
 use axum::{
-    http::{header::CONTENT_TYPE, HeaderValue, Method},
+    http::{
+        header::{AUTHORIZATION, CONTENT_TYPE},
+        HeaderValue, Method,
+    },
     Extension,
 };
 use std::env;
@@ -34,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cors = CorsLayer::new()
         .allow_origin(frontend_origin)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([CONTENT_TYPE])
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
         .allow_credentials(true);
 
     let trace = TraceLayer::new_for_http();

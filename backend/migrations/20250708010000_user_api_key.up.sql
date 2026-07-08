@@ -1,0 +1,3 @@
+ALTER TABLE users
+  ADD COLUMN api_key_hash VARCHAR(255) NULL,
+  ADD COLUMN api_key_prefix VARCHAR(16) NULL;

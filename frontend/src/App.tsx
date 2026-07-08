@@ -22,7 +22,7 @@ import { CardConnector } from "./schema/Connrctor.js";
 import { Dimmension } from "./schema/Point.js";
 // import { DataCheck } from "./DataCheck/DataCheck.jsx";
 import SideCardTree from "./SideCardTree/SideCardTree.jsx";
-import { getAuthStatus, login, logout } from "./hooks/useAuthAPI.js";
+import { generateApiToken, getAuthStatus, login, logout } from "./hooks/useAuthAPI.js";
 
 const LOGIN_QUERY_KEY = import.meta.env.VITE_LOGIN_QUERY_KEY ?? "";
 const LOGIN_QUERY_VALUE = import.meta.env.VITE_LOGIN_QUERY_VALUE ?? "";
@@ -59,6 +59,8 @@ function App() {
   const [authEnabled, setAuthEnabled] = createSignal(true);
   const [password, setPassword] = createSignal("");
   const [authError, setAuthError] = createSignal("");
+  const [apiToken, setApiToken] = createSignal("");
+  const [apiTokenError, setApiTokenError] = createSignal("");
   const [showLoginControls, setShowLoginControls] = createSignal(false);
   const sidebarWidth = 280;
   const [sidebarOpen, setSidebarOpen] = createSignal(false);
@@ -257,6 +259,8 @@ function App() {
       setCanEdit(status.authenticated);
       setAuthEnabled(status.auth_enabled);
       setPassword("");
+      setApiToken("");
+      setApiTokenError("");
     } catch (e) {
       console.error(e);
       setAuthError("ログインできませんでした");
@@ -272,8 +276,23 @@ function App() {
       setCanEdit(status.authenticated);
       setAuthEnabled(status.auth_enabled);
       setEdittingCard(null);
+      setApiToken("");
+      setApiTokenError("");
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleGenerateApiToken = async () => {
+    setApiTokenError("");
+
+    try {
+      const res = await generateApiToken();
+      setApiToken(res.token);
+    } catch (e) {
+      console.error(e);
+      setApiToken("");
+      setApiTokenError("APIトークンを発行できませんでした");
     }
   };
 
@@ -295,8 +314,11 @@ function App() {
         password={password}
         setPassword={setPassword}
         authError={authError}
+        apiToken={apiToken}
+        apiTokenError={apiTokenError}
         onLogin={handleLogin}
         onLogout={handleLogout}
+        onGenerateApiToken={handleGenerateApiToken}
         onReveal={(id) => {
           setRevealCardId(id);
           try {

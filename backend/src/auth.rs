@@ -11,7 +11,7 @@ use argon2::{
 use axum::{
     extract::{Request, State},
     http::{
-        header::{COOKIE, SET_COOKIE},
+        header::{AUTHORIZATION, COOKIE, SET_COOKIE},
         HeaderMap, HeaderValue, Method, StatusCode,
     },
     middleware::Next,
@@ -52,6 +52,19 @@ pub struct LoginParams {
 pub struct AuthStatus {
     authenticated: bool,
     auth_enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct ApiTokenResponse {
+    token: String,
+    prefix: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ApiKeyUserRow {
+    id: i64,
+    role: String,
+    api_key_hash: String,
 }
 
 impl AuthState {
@@ -146,6 +159,24 @@ impl AuthState {
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.remove(token);
         }
+    }
+
+    async fn api_key_user(&self, pool: &Pool<MySql>, headers: &HeaderMap) -> Option<SessionUser> {
+        let token = bearer_token_from_headers(headers)?;
+        let users = sqlx::query_as::<_, ApiKeyUserRow>(
+            "SELECT id, role, api_key_hash FROM users WHERE is_active = TRUE AND api_key_hash IS NOT NULL",
+        )
+        .fetch_all(pool)
+        .await
+        .ok()?;
+
+        users.into_iter().find_map(|user| {
+            self.verify_password(token, &user.api_key_hash)
+                .then_some(SessionUser {
+                    user_id: user.id,
+                    role: user.role,
+                })
+        })
     }
 
     fn session_cookie(&self, token: &str) -> String {
@@ -291,8 +322,63 @@ pub async fn logout(
     response
 }
 
+pub async fn generate_api_token(
+    State(state): State<AuthState>,
+    Extension(pool): Extension<Pool<MySql>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(user) = state.current_user(&headers) else {
+        return ApiResponse::<ApiTokenResponse>::new_err(
+            StatusCode::UNAUTHORIZED,
+            "login required",
+        )
+        .into_response();
+    };
+
+    let token = generate_api_token_value();
+    let prefix = token.chars().take(12).collect::<String>();
+    let hash = match state.hash_password(&token) {
+        Ok(hash) => hash,
+        Err(e) => {
+            return ApiResponse::<ApiTokenResponse>::new_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e,
+            )
+            .into_response();
+        }
+    };
+
+    let result = sqlx::query(
+        "UPDATE users SET api_key_hash = ?, api_key_prefix = ? WHERE id = ? AND is_active = TRUE",
+    )
+    .bind(hash)
+    .bind(&prefix)
+    .bind(user.user_id)
+    .execute(&pool)
+    .await;
+
+    match result {
+        Ok(result) if result.rows_affected() > 0 => ApiResponse::new_ok(
+            StatusCode::OK,
+            ApiTokenResponse { token, prefix },
+        )
+        .into_response(),
+        Ok(_) => ApiResponse::<ApiTokenResponse>::new_err(
+            StatusCode::UNAUTHORIZED,
+            "login required",
+        )
+        .into_response(),
+        Err(e) => ApiResponse::<ApiTokenResponse>::new_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        )
+        .into_response(),
+    }
+}
+
 pub async fn require_write_auth(
     State(state): State<AuthState>,
+    Extension(pool): Extension<Pool<MySql>>,
     req: Request,
     next: Next,
 ) -> Response {
@@ -308,7 +394,20 @@ pub async fn require_write_auth(
         return next.run(req).await;
     }
 
+    if state.api_key_user(&pool, req.headers()).await.is_some() {
+        return next.run(req).await;
+    }
+
     ApiResponse::<()>::new_err(StatusCode::UNAUTHORIZED, "authentication required").into_response()
+}
+
+fn generate_api_token_value() -> String {
+    let value: String = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(48)
+        .map(char::from)
+        .collect();
+    format!("memo_{value}")
 }
 
 fn session_token_from_headers(headers: &HeaderMap) -> Option<&str> {
@@ -318,4 +417,9 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<&str> {
         let (name, value) = part.trim().split_once('=')?;
         (name == SESSION_COOKIE && !value.is_empty()).then_some(value)
     })
+}
+
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    value.strip_prefix("Bearer ").filter(|token| !token.is_empty())
 }

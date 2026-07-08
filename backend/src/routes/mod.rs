@@ -1,4 +1,4 @@
-use crate::auth::{login, logout, require_write_auth, status, AuthState};
+use crate::auth::{generate_api_token, login, logout, require_write_auth, status, AuthState};
 use crate::handlers::card_card::{
     connect_card_to_card, disconnect_card_to_card, get_connectors, update_connector,
 };
@@ -17,6 +17,7 @@ pub fn router(auth_state: AuthState) -> Router {
         .route("/auth/status", get(status))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
+        .route("/auth/api-token", post(generate_api_token))
         .route("/cards", get(get_cards))
         .route("/cards/in_range", get(get_cards_in_range))
         .route(

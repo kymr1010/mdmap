@@ -16,8 +16,11 @@ type SideCardTreeProps = {
   password?: Accessor<string>;
   setPassword?: (value: string) => void;
   authError?: Accessor<string>;
+  apiToken?: Accessor<string>;
+  apiTokenError?: Accessor<string>;
   onLogin?: (event: Event) => void;
   onLogout?: () => void;
+  onGenerateApiToken?: () => void;
 };
 
 type TreeItem = Card & { children: TreeItem[] };
@@ -89,10 +92,26 @@ export const SideCardTree = (props: SideCardTreeProps) => {
                   </form>
                 }
               >
-                <StatusRow>
-                  <StatusText>編集モード</StatusText>
-                  <button onClick={() => props.onLogout?.()}>ログアウト</button>
-                </StatusRow>
+                <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+                  <StatusRow>
+                    <StatusText>編集モード</StatusText>
+                    <button onClick={() => props.onLogout?.()}>ログアウト</button>
+                  </StatusRow>
+                  <button onClick={() => props.onGenerateApiToken?.()}>
+                    APIトークン発行
+                  </button>
+                  <Show when={props.apiToken?.()}>
+                    <TokenBox>
+                      <TokenLabel>発行されたAPIトークン</TokenLabel>
+                      <textarea readOnly value={props.apiToken?.() ?? ""} />
+                    </TokenBox>
+                  </Show>
+                  <Show when={props.apiTokenError?.()}>
+                    <span style={{ color: "#ff6b6b", "font-size": "12px" }}>
+                      {props.apiTokenError?.()}
+                    </span>
+                  </Show>
+                </div>
               </Show>
             </AuthSection>
           </Show>
@@ -226,6 +245,34 @@ const StatusRow = styled("div", {
 });
 
 const StatusText = styled("span", {
+  base: {
+    fontSize: "12px",
+    color: "#9aa0a6",
+  },
+});
+
+const TokenBox = styled("div", {
+  base: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    "& textarea": {
+      width: "100%",
+      minHeight: "68px",
+      boxSizing: "border-box",
+      padding: "6px",
+      border: "1px solid #3a3a3a",
+      borderRadius: "4px",
+      background: "#151515",
+      color: "#eee",
+      fontFamily: "monospace",
+      fontSize: "12px",
+      resize: "vertical",
+    },
+  },
+});
+
+const TokenLabel = styled("span", {
   base: {
     fontSize: "12px",
     color: "#9aa0a6",

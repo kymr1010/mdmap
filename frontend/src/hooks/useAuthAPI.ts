@@ -5,6 +5,11 @@ export interface AuthStatus {
   auth_enabled: boolean;
 }
 
+export interface ApiTokenResponse {
+  token: string;
+  prefix: string;
+}
+
 export const getAuthStatus = async (): Promise<AuthStatus> => {
   const res = await fetchAPI("auth/status", {
     method: "GET",
@@ -28,4 +33,11 @@ export const logout = async (): Promise<AuthStatus> => {
     method: "POST",
   });
   return res.data as AuthStatus;
+};
+
+export const generateApiToken = async (): Promise<ApiTokenResponse> => {
+  const res = await fetchAPI("auth/api-token", {
+    method: "POST",
+  });
+  return res.data as ApiTokenResponse;
 };
