@@ -6,9 +6,11 @@ import { EditorPanel } from "./EditorPanel/EditorPanel.jsx";
 import { Card, Dir } from "./schema/Card.js";
 import { getCards, updateCard } from "./hooks/useCardAPI.js";
 import {
-  normalizeCardsToRelative,
   buildCardMap,
   getAbsPosFromMap,
+  ORIGIN,
+  subtractPos,
+  withStoredPosFromAbs,
 } from "./utils/position.js";
 import {
   attachChildToParent,
@@ -141,8 +143,7 @@ function App() {
     const map = buildCardMap(cards());
 
     if (nextType === "frame") {
-      const abs = getAbsPosFromMap(map, card.id);
-      await updateCard({ ...card, position: abs });
+      await updateCard(card);
       setCardRelations((prev) =>
         prev.map((r) => (r.parent_id === card.id ? { ...r, connector: null } : r)),
       );
@@ -156,14 +157,13 @@ function App() {
       );
       const newParentAbs = { ...canvasMousePosition() };
       const parentOfParentAbs =
-        card.parent_id != null ? getAbsPosFromMap(map, card.parent_id) : { x: 0, y: 0 };
+        card.parent_id != null ? getAbsPosFromMap(map, card.parent_id) : ORIGIN;
       const movedParent: Card = {
         ...card,
-        position: {
-          x: newParentAbs.x - parentOfParentAbs.x,
-          y: newParentAbs.y - parentOfParentAbs.y,
-        },
+        position: subtractPos(newParentAbs, parentOfParentAbs),
       };
+      const movedMap = new Map(map);
+      movedMap.set(card.id, movedParent);
       const connectors = new Map<Card["id"], CardConnector>();
 
       for (const relation of directRelations) {
@@ -183,10 +183,7 @@ function App() {
           if (!childAbs) return c;
           return {
             ...c,
-            position: {
-              x: childAbs.x - newParentAbs.x,
-              y: childAbs.y - newParentAbs.y,
-            },
+            position: subtractPos(childAbs, newParentAbs),
           };
         }),
       );
@@ -198,7 +195,15 @@ function App() {
         ),
       );
 
-      await updateCard({ ...movedParent, position: newParentAbs });
+      await updateCard(movedParent);
+      await Promise.all(
+        directRelations.map((r) => {
+          const childAbs = childAbsById.get(r.child_id);
+          const child = map.get(r.child_id);
+          if (!childAbs || !child) return Promise.resolve();
+          return updateCard(withStoredPosFromAbs(movedMap, child, childAbs));
+        }),
+      );
       await Promise.all(
         directRelations.map((r) => {
           const connector = connectors.get(r.child_id);
@@ -221,7 +226,7 @@ function App() {
     const rels = await getCardRelations();
     const fetched = await getCards();
     setCardRelations(rels);
-    setCards(normalizeCardsToRelative(fetched));
+    setCards(fetched);
   };
 
   onMount(async () => {
@@ -364,11 +369,10 @@ function App() {
             });
           }}
           onSave={async (card, previousCard) => {
-            // Persist edits to DB using absolute position
+            // Persist the same coordinate system as state: roots are absolute, children are relative.
             const handledConversion = await handleFrameTypeConversion(card, previousCard);
             if (!handledConversion) {
-              const abs = getAbsPosFromMap(buildCardMap(cards()), card.id);
-              await updateCard({ ...card, position: abs });
+              await updateCard(card);
             }
             setEdittingCard(null);
           }}

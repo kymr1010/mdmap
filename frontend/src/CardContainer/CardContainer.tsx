@@ -31,7 +31,14 @@ import {
 import { attachChildToParent, connectCards, disconnectCards } from "../hooks/useConnectAPI.js";
 import { CardRelation } from "../schema/CardRelation.js";
 import { CardElm } from "../Card/Card.jsx";
-import { getAbsPosFromMap } from "../utils/position.js";
+import {
+  ORIGIN,
+  subtractPos,
+  withParentFromAbs,
+  withStoredPosFromAbs,
+  withoutParentFromAbs,
+  getAbsPosFromMap,
+} from "../utils/position.js";
 import { extractFirstH1 } from "../utils/markdown.js";
 import { PageView } from "../PageView/PageView.jsx";
 import { inputManager } from "../input/manager.js";
@@ -255,30 +262,11 @@ export const CardContainer = (props: CardContainerProps) => {
       };
 
       connectCards(parentId, childId, connector).then((res) => {
-        props.setCardRelations((prev) => [
-          ...prev,
-          {
-            parent_id: parentId,
-            child_id: childId,
-            connector,
-          },
-        ]);
-
-        const parentAbs = getAbsPos(parentId);
         const childAbs = getAbsPos(childId);
-        const newChildCard: Card = {
-          ...childCard,
-          parent_id: parentId,
-          position: {
-            x: childAbs.x - parentAbs.x,
-            y: childAbs.y - parentAbs.y,
-          },
-        };
-        props.setCards((prev) =>
-          prev.map((c) => (c.id === childId ? newChildCard : c))
-        );
-        // Keep DB's absolute shape unchanged on relation change
-        updateCard({ ...childCard, position: childAbs });
+        const newChildCard = withParentFromAbs(cardMap(), childCard, parentId, childAbs);
+        appendRelation({ parent_id: parentId, child_id: childId, connector });
+        replaceCard(newChildCard);
+        updateCard(newChildCard);
         // Clear temp connector states
         setConnectStartedConnector(null);
         setNearestConnector(null);
@@ -450,7 +438,7 @@ export const CardContainer = (props: CardContainerProps) => {
       });
       const draftCard = {
         id: 0,
-        position: previewWorldPosition,
+        position: subtractPos(previewWorldPosition, sourceAbs),
         size: { x: 260, y: 180 },
         title: "",
         contents: "",
@@ -464,10 +452,7 @@ export const CardContainer = (props: CardContainerProps) => {
         const childCard: Card = {
           ...created,
           parent_id: sourceCardId,
-          position: {
-            x: previewWorldPosition.x - sourceAbs.x,
-            y: previewWorldPosition.y - sourceAbs.y,
-          },
+          position: created.position,
         };
         const nextSource: Card = {
           ...source,
@@ -477,10 +462,7 @@ export const CardContainer = (props: CardContainerProps) => {
         props.setCards((prev) =>
           prev.map((c) => (c.id === sourceCardId ? nextSource : c)).concat(childCard)
         );
-        props.setCardRelations((prev) => [
-          ...prev,
-          { parent_id: sourceCardId, child_id: created.id, connector: null },
-        ]);
+        appendRelation({ parent_id: sourceCardId, child_id: created.id, connector: null });
         setHiddenLinkedCardIds((prev) => new Set(prev).add(created.id));
         setLinkPreview({
           cardId: created.id,
@@ -488,7 +470,7 @@ export const CardContainer = (props: CardContainerProps) => {
         });
 
         await attachChildToParent(sourceCardId, created.id);
-        await updateCard({ ...nextSource, position: sourceAbs });
+        await updateCard(nextSource);
       } catch (e) {
         console.error(e);
       }
@@ -518,7 +500,7 @@ export const CardContainer = (props: CardContainerProps) => {
     const parentAbs = getAbsPos(parentId);
     const draftCard = {
       id: 0,
-      position: childAbs,
+      position: subtractPos(childAbs, parentAbs),
       size,
       title: "",
       contents: "",
@@ -531,10 +513,7 @@ export const CardContainer = (props: CardContainerProps) => {
     const childCard: Card = {
       ...created,
       parent_id: parentId,
-      position: {
-        x: childAbs.x - parentAbs.x,
-        y: childAbs.y - parentAbs.y,
-      },
+      position: created.position,
     };
     const childConnPoint: CardConnectorPoint = {
       cardId: created.id,
@@ -551,14 +530,7 @@ export const CardContainer = (props: CardContainerProps) => {
 
     await connectCards(parentId, created.id, connector);
     props.setCards((prev) => [...prev, childCard]);
-    props.setCardRelations((prev) => [
-      ...prev,
-      {
-        parent_id: parentId,
-        child_id: created.id,
-        connector,
-      },
-    ]);
+    appendRelation({ parent_id: parentId, child_id: created.id, connector });
 
     const setter = posSetters.get(created.id);
     if (setter) setter(childAbs);
@@ -824,10 +796,11 @@ export const CardContainer = (props: CardContainerProps) => {
     // If the card is dropped inside a frame (or created from a frame's menu),
     // it becomes that frame's child.
     const frame = frameOverride ?? findContainingFrame(dropAbs);
+    const frameAbs = frame ? getAbsPos(frame.id) : ORIGIN;
 
     const newCard = {
       id: 0,
-      position: dropAbs,
+      position: frame ? subtractPos(dropAbs, frameAbs) : dropAbs,
       size: {
         x: 200,
         y: 200,
@@ -840,25 +813,17 @@ export const CardContainer = (props: CardContainerProps) => {
     console.log(newCard);
     createCard(newCard)
       .then((created) => {
-        // created.position is absolute (no parent relation yet)
         if (frame) {
-          const frameAbs = getAbsPos(frame.id);
           const childCard: Card = {
             ...created,
             parent_id: frame.id,
-            position: {
-              x: created.position.x - frameAbs.x,
-              y: created.position.y - frameAbs.y,
-            },
+            position: created.position,
           };
           props.setCards((prev) => [...prev, childCard]);
           // Containment relation: establishes parent_id but draws no line.
-          props.setCardRelations((prev) => [
-            ...prev,
-            { parent_id: frame.id, child_id: created.id, connector: null },
-          ]);
+          appendRelation({ parent_id: frame.id, child_id: created.id, connector: null });
           const setter = posSetters.get(created.id);
-          if (setter) setter(created.position);
+          if (setter) setter(dropAbs);
           attachChildToParent(frame.id, created.id).catch(console.error);
         } else {
           props.setCards((prev) => [...prev, created]);
@@ -902,21 +867,6 @@ export const CardContainer = (props: CardContainerProps) => {
     }
   };
 
-  const addCardRelation = (
-    from: Card["id"],
-    to: Card["id"],
-    connector: CardConnector
-  ) => {
-    props.setCardRelations((prev) => [
-      ...prev,
-      {
-        parent_id: from,
-        child_id: to,
-        connector,
-      },
-    ]);
-  };
-
   const visibleCards = () => {
     const { x: cx, y: cy } = currentTile();
     const neededKeys: string[] = [];
@@ -930,6 +880,38 @@ export const CardContainer = (props: CardContainerProps) => {
   };
 
   const getAbsPos = (id: number): Dimmension => getAbsPosFromMap(cardMap(), id);
+
+  const replaceCard = (card: Card) => {
+    props.setCards((prev) => prev.map((c) => (c.id === card.id ? card : c)));
+  };
+
+  const appendRelation = (relation: CardRelation) => {
+    props.setCardRelations((prev) =>
+      prev.some(
+        (r) =>
+          r.parent_id === relation.parent_id &&
+          r.child_id === relation.child_id
+      )
+        ? prev
+        : [...prev, relation]
+    );
+  };
+
+  const detachRelation = (parentId: Card["id"], childId: Card["id"]) => {
+    props.setCardRelations((prev) =>
+      prev.filter((r) => !(r.parent_id === parentId && r.child_id === childId))
+    );
+  };
+
+  const removeCardAndRelations = (cardId: Card["id"], children: Card[]) => {
+    props.setCards((prev) => {
+      const removed = prev.filter((c) => c.id !== cardId);
+      return removed.map((c) => children.find((p) => p.id === c.id) ?? c);
+    });
+    props.setCardRelations((prev) =>
+      prev.filter((r) => r.parent_id !== cardId && r.child_id !== cardId)
+    );
+  };
 
   // Collect all descendant ids (children, grandchildren, ...)
   const getDescendants = (rootId: number): number[] => {
@@ -1108,7 +1090,6 @@ export const CardContainer = (props: CardContainerProps) => {
               // Register for live lookup
               posGetters.set(id, position);
               posSetters.set(id, setPosition);
-              const parentAbs = () => (cardAcc().parent_id ? getAbsPos(cardAcc().parent_id!) : { x: 0, y: 0 });
               return (
                 <div
                   style={{
@@ -1130,14 +1111,12 @@ export const CardContainer = (props: CardContainerProps) => {
                     onCardLinkClick={openLinkedCardPreview}
                     canEdit={props.canEdit}
                     setCard={(newCard) => {
-                      // Ensure stored position remains relative to parent
-                      const parentAbs = newCard.parent_id ? getAbsPos(newCard.parent_id) : { x: 0, y: 0 };
-                      const relative = {
-                        x: newCard.position.x - parentAbs.x,
-                        y: newCard.position.y - parentAbs.y,
-                      };
-                      const patched = { ...newCard, position: relative };
-                      props.setCards((prev) => prev.map((c) => (c.id === id ? patched : c)));
+                      const patched = withStoredPosFromAbs(
+                        cardMap(),
+                        newCard,
+                        newCard.position,
+                      );
+                      replaceCard(patched);
                     }}
                     startConnect={(e, pos, cardId, dir) => {
                       startConnect(e, pos, cardId);
@@ -1171,59 +1150,36 @@ export const CardContainer = (props: CardContainerProps) => {
                           ? findContainingFrame(dropCenter, updated.id)
                           : undefined;
                       if (containingFrame) {
-                        const frameAbs = getAbsPos(containingFrame.id);
-                        const patched: Card = {
-                          ...updated,
+                        const patched = withParentFromAbs(
+                          cardMap(),
+                          updated,
+                          containingFrame.id,
+                          updated.position,
+                        );
+                        replaceCard(patched);
+                        appendRelation({
                           parent_id: containingFrame.id,
-                          position: {
-                            x: updated.position.x - frameAbs.x,
-                            y: updated.position.y - frameAbs.y,
-                          },
-                        };
-                        props.setCards((prev) =>
-                          prev.map((c) => (c.id === id ? patched : c))
-                        );
-                        props.setCardRelations((prev) =>
-                          prev.some(
-                            (r) =>
-                              r.parent_id === containingFrame.id &&
-                              r.child_id === updated.id
-                          )
-                            ? prev
-                            : [
-                                ...prev,
-                                {
-                                  parent_id: containingFrame.id,
-                                  child_id: updated.id,
-                                  connector: null,
-                                },
-                              ]
-                        );
+                          child_id: updated.id,
+                          connector: null,
+                        });
                         attachChildToParent(containingFrame.id, updated.id)
                           .then(() =>
-                            updateCard({
-                              ...updated,
-                              position: { ...updated.position },
-                            })
+                            updateCard(patched)
                           )
                           .catch(console.error);
                         return;
                       }
-                      // Convert absolute drop position to relative for in-memory state
-                      const parentAbs = updated.parent_id ? getAbsPos(updated.parent_id) : { x: 0, y: 0 };
-                      const relative = {
-                        x: updated.position.x - parentAbs.x,
-                        y: updated.position.y - parentAbs.y,
-                      };
-                      const patched = { ...updated, position: relative };
-                      props.setCards((prev) => prev.map((c) => (c.id === id ? patched : c)));
-                      // Persist absolute to DB to keep shape correct
-                      updateCard({ ...updated, position: { ...updated.position } });
+                      const patched = withStoredPosFromAbs(
+                        cardMap(),
+                        updated,
+                        updated.position,
+                      );
+                      replaceCard(patched);
+                      updateCard(patched);
                     }}
                     onDelete={async (deleteId) => {
                       // Capture card and relevant positions before mutating state
                       const doomed = cardAcc();
-                      const doomedAbs = getAbsPos(deleteId);
                       // Gather relations to remove in DB (both parent and child sides)
                       const rels = props
                         .cardRelations()
@@ -1231,21 +1187,9 @@ export const CardContainer = (props: CardContainerProps) => {
                       // Detach direct children: set parent_id null and keep absolute position
                       const children = props.cards().filter((c) => c.parent_id === deleteId);
                       const patchedChildren = children.map((ch) => {
-                        const abs = getAbsPos(ch.id);
-                        return { ...ch, parent_id: undefined, position: abs } as Card;
+                        return withoutParentFromAbs(cardMap(), ch);
                       });
-                      // Update state: remove card, patch children, remove relations
-                      props.setCards((prev) => {
-                        const removed = prev.filter((c) => c.id !== deleteId);
-                        // Apply children patches
-                        return removed.map((c) => {
-                          const patched = patchedChildren.find((p) => p.id === c.id);
-                          return patched ? patched : c;
-                        });
-                      });
-                      props.setCardRelations((prev) =>
-                        prev.filter((r) => r.parent_id !== deleteId && r.child_id !== deleteId)
-                      );
+                      removeCardAndRelations(deleteId, patchedChildren);
                       // Clean live registries
                       posGetters.delete(deleteId);
                       posSetters.delete(deleteId);
@@ -1255,6 +1199,7 @@ export const CardContainer = (props: CardContainerProps) => {
                         await Promise.all(
                           rels.map((r) => disconnectCards(r.parent_id, r.child_id))
                         );
+                        await Promise.all(patchedChildren.map((ch) => updateCard(ch)));
                         await deleteCardAPI(doomed);
                       } catch (e) {
                         console.error(e);
@@ -1264,17 +1209,13 @@ export const CardContainer = (props: CardContainerProps) => {
                       const child = cardAcc();
                       if (child.parent_id == null) return;
                       const parentId = child.parent_id;
-                      // Compute absolute to preserve on screen
-                      const abs = getAbsPos(childId);
-                      const patched: Card = { ...child, parent_id: undefined, position: abs };
-                      props.setCards((prev) => prev.map((c) => (c.id === childId ? patched : c)));
-                      props.setCardRelations((prev) =>
-                        prev.filter((r) => !(r.parent_id === parentId && r.child_id === childId))
-                      );
+                      const patched = withoutParentFromAbs(cardMap(), child);
+                      replaceCard(patched);
+                      detachRelation(parentId, childId);
                       try {
                         await disconnectCards(parentId, childId);
-                        // DB shape should already be absolute; keep it by updating with abs
-                        await updateCard({ ...child, position: abs });
+                        // Once detached, the card becomes a root and must persist absolute position.
+                        await updateCard(patched);
                       } catch (e) {
                         console.error(e);
                       }
