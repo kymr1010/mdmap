@@ -36,6 +36,7 @@ import { extractFirstH1 } from "../utils/markdown.js";
 import { PageView } from "../PageView/PageView.jsx";
 import { inputManager } from "../input/manager.js";
 import { createLongPressContextMenu } from "../input/gestures.js";
+import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
 
 export interface CardContainerProps {
   position: Dimmension;
@@ -148,6 +149,7 @@ export const CardContainer = (props: CardContainerProps) => {
     } catch {}
   };
   const openPage = (id: number) => {
+    setLinkPreview(null);
     setPageViewId(id);
     pushUrlForCard(id);
   };
@@ -197,10 +199,23 @@ export const CardContainer = (props: CardContainerProps) => {
         }
       } else {
         setPageViewId(null);
+        setLinkPreview(null);
       }
     };
     window.addEventListener("popstate", handler);
     onCleanup(() => window.removeEventListener("popstate", handler));
+  });
+
+  onMount(() => {
+    const closePreview = (event: PointerEvent) => {
+      if (!linkPreview()) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-linked-card-preview]")) return;
+      setLinkPreview(null);
+    };
+    window.addEventListener("pointerdown", closePreview, true);
+    onCleanup(() => window.removeEventListener("pointerdown", closePreview, true));
   });
 
   const { currentLine, startConnect } = useConnector({
@@ -324,15 +339,104 @@ export const CardContainer = (props: CardContainerProps) => {
   const replaceFirstNewCardLink = (contents: string, cardId: Card["id"]) =>
     contents.replace("/card/new", `/card/${cardId}`);
 
+  const getPreviewScreenPosition = (
+    sourceCardId: Card["id"] | null,
+    screenPosition: Dimmension,
+    anchorRect?: DOMRect
+  ): Dimmension => {
+    const clampValue = (value: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, value));
+    const pointDistance = (a: Dimmension, b: Dimmension) =>
+      Math.hypot(a.x - b.x, a.y - b.y);
+    const previewSize = { x: 320, y: 360 };
+    const margin = 12;
+    const viewport = { x: window.innerWidth, y: window.innerHeight };
+    const source = sourceCardId == null ? undefined : cardMap().get(sourceCardId);
+    const sourceAbs = source ? getAbsPos(source.id) : null;
+    const avoid = source && sourceAbs
+      ? {
+          left: position().x + sourceAbs.x * scale(),
+          top: position().y + sourceAbs.y * scale(),
+          right: position().x + (sourceAbs.x + source.size.x) * scale(),
+          bottom: position().y + (sourceAbs.y + source.size.y) * scale(),
+        }
+      : anchorRect
+        ? {
+            left: anchorRect.left,
+            top: anchorRect.top,
+            right: anchorRect.right,
+            bottom: anchorRect.bottom,
+          }
+        : {
+            left: screenPosition.x,
+            top: screenPosition.y,
+            right: screenPosition.x,
+            bottom: screenPosition.y,
+          };
+
+    const clampPoint = (p: Dimmension): Dimmension => ({
+      x: clampValue(p.x, margin, viewport.x - previewSize.x - margin),
+      y: clampValue(p.y, margin, viewport.y - previewSize.y - margin),
+    });
+    const overlaps = (p: Dimmension) =>
+      p.x < avoid.right &&
+      p.x + previewSize.x > avoid.left &&
+      p.y < avoid.bottom &&
+      p.y + previewSize.y > avoid.top;
+    const candidates = [
+      { x: avoid.right + margin, y: screenPosition.y - 28 },
+      { x: avoid.left - previewSize.x - margin, y: screenPosition.y - 28 },
+      { x: screenPosition.x - previewSize.x / 2, y: avoid.bottom + margin },
+      { x: screenPosition.x - previewSize.x / 2, y: avoid.top - previewSize.y - margin },
+    ].map(clampPoint);
+
+    candidates.sort(
+      (a, b) =>
+        pointDistance(a, screenPosition) - pointDistance(b, screenPosition)
+    );
+    return candidates.find((p) => !overlaps(p)) ?? candidates[0];
+  };
+
+  const hrefFromCardLinkClick = (event: MouseEvent): {
+    href: string;
+    anchorRect: DOMRect;
+  } | null => {
+    const target = event.target;
+    if (!(target instanceof Element)) return null;
+    const link = target.closest("a");
+    if (!(link instanceof HTMLAnchorElement)) return null;
+
+    const url = new URL(link.href, window.location.origin);
+    if (url.origin !== window.location.origin) return null;
+    if (!/^\/card\/(?:new|\d+)$/.test(url.pathname)) return null;
+    return { href: url.pathname, anchorRect: link.getBoundingClientRect() };
+  };
+
+  const handleLinkedMarkdownClick = (
+    sourceCardId: Card["id"],
+    event: MouseEvent
+  ) => {
+    const link = hrefFromCardLinkClick(event);
+    if (!link) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openLinkedCardPreview(sourceCardId, link.href, {
+      x: event.clientX,
+      y: event.clientY,
+    }, link.anchorRect);
+  };
+
   const openLinkedCardPreview = async (
     sourceCardId: Card["id"],
     href: string,
-    screenPosition: Dimmension
+    screenPosition: Dimmension,
+    anchorRect?: DOMRect
   ) => {
-    const previewPosition = {
-      x: screenToWorld(screenPosition).x + 16,
-      y: screenToWorld(screenPosition).y + 16,
-    };
+    const previewPosition = getPreviewScreenPosition(
+      sourceCardId,
+      screenPosition,
+      anchorRect
+    );
 
     if (href === "/card/new") {
       if (!props.canEdit()) return;
@@ -340,13 +444,18 @@ export const CardContainer = (props: CardContainerProps) => {
       if (!source) return;
 
       const sourceAbs = getAbsPos(sourceCardId);
+      const previewWorldPosition = screenToWorld({
+        x: previewPosition.x,
+        y: previewPosition.y,
+      });
       const draftCard = {
         id: 0,
-        position: previewPosition,
+        position: previewWorldPosition,
         size: { x: 260, y: 180 },
         title: "",
         contents: "",
         parent_id: sourceCardId,
+        visibility: source.visibility ?? "public",
         tag_ids: [],
       };
 
@@ -356,8 +465,8 @@ export const CardContainer = (props: CardContainerProps) => {
           ...created,
           parent_id: sourceCardId,
           position: {
-            x: previewPosition.x - sourceAbs.x,
-            y: previewPosition.y - sourceAbs.y,
+            x: previewWorldPosition.x - sourceAbs.x,
+            y: previewWorldPosition.y - sourceAbs.y,
           },
         };
         const nextSource: Card = {
@@ -414,6 +523,7 @@ export const CardContainer = (props: CardContainerProps) => {
       title: "",
       contents: "",
       parent_id: parentId,
+      visibility: cardMap().get(parentId)?.visibility ?? "public",
       tag_ids: [],
     };
 
@@ -613,6 +723,10 @@ export const CardContainer = (props: CardContainerProps) => {
   };
 
   const handlePointerMove = (event: PointerEvent) => {
+    setMousePosition({
+      x: event.clientX - position().x,
+      y: event.clientY - position().y,
+    });
     if (event.pointerType !== "touch" || !touchPointers.has(event.pointerId)) return;
     touchPointers.set(event.pointerId, {
       x: event.clientX,
@@ -681,10 +795,14 @@ export const CardContainer = (props: CardContainerProps) => {
   });
 
   // Innermost frame card whose area contains the given absolute point (if any).
-  const findContainingFrame = (p: Dimmension): Card | undefined => {
+  const findContainingFrame = (
+    p: Dimmension,
+    excludeId?: Card["id"]
+  ): Card | undefined => {
     const containing = props
       .cards()
       .filter((c) => c.card_type === "frame")
+      .filter((c) => c.id !== excludeId)
       .filter((f) => {
         const a = getAbsPos(f.id);
         return (
@@ -716,6 +834,7 @@ export const CardContainer = (props: CardContainerProps) => {
       },
       title: "",
       contents: "",
+      visibility: frame?.visibility ?? "public",
       tag_ids: [],
     };
     console.log(newCard);
@@ -921,6 +1040,7 @@ export const CardContainer = (props: CardContainerProps) => {
         return {
           id: f.id,
           title: f.title || "(untitled)",
+          visibility: f.visibility,
           screenX: pos.x + a.x * s,
           screenY: pos.y + a.y * s,
           w: f.size.x * s,
@@ -937,6 +1057,7 @@ export const CardContainer = (props: CardContainerProps) => {
       .map((r) => ({
         id: r.id,
         title: r.title,
+        visibility: r.visibility,
         // Clamp to the viewport: clipped-at-top -> pin to top (top=margin) but
         // keep the real X; clipped-at-left -> pin to left but keep the real Y.
         left: clamp(r.screenX, STICKY_MARGIN, vw - STICKY_MARGIN),
@@ -988,8 +1109,6 @@ export const CardContainer = (props: CardContainerProps) => {
               posGetters.set(id, position);
               posSetters.set(id, setPosition);
               const parentAbs = () => (cardAcc().parent_id ? getAbsPos(cardAcc().parent_id!) : { x: 0, y: 0 });
-              const cardPosition = () => ({ x: position().x - parentAbs().x, y: position().y - parentAbs().y });
-
               return (
                 <div
                   style={{
@@ -1003,7 +1122,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     mousePosition={mousePosition}
                     setNodePosition={setPosition}
                     nodePosition={position}
-                    cardPosition={cardPosition}
+                    cardPosition={position}
                     isMinimized={() => isMinimized(id)}
                     onToggleMinimize={toggleMinimize}
                     onOpenPage={openPage}
@@ -1043,6 +1162,53 @@ export const CardContainer = (props: CardContainerProps) => {
                     onUpdateCard={(updated) => {
                       // Clear tracking since drag ends
                       lastDragDelta.delete(id);
+                      const dropCenter = {
+                        x: updated.position.x + updated.size.x / 2,
+                        y: updated.position.y + updated.size.y / 2,
+                      };
+                      const containingFrame =
+                        updated.parent_id == null
+                          ? findContainingFrame(dropCenter, updated.id)
+                          : undefined;
+                      if (containingFrame) {
+                        const frameAbs = getAbsPos(containingFrame.id);
+                        const patched: Card = {
+                          ...updated,
+                          parent_id: containingFrame.id,
+                          position: {
+                            x: updated.position.x - frameAbs.x,
+                            y: updated.position.y - frameAbs.y,
+                          },
+                        };
+                        props.setCards((prev) =>
+                          prev.map((c) => (c.id === id ? patched : c))
+                        );
+                        props.setCardRelations((prev) =>
+                          prev.some(
+                            (r) =>
+                              r.parent_id === containingFrame.id &&
+                              r.child_id === updated.id
+                          )
+                            ? prev
+                            : [
+                                ...prev,
+                                {
+                                  parent_id: containingFrame.id,
+                                  child_id: updated.id,
+                                  connector: null,
+                                },
+                              ]
+                        );
+                        attachChildToParent(containingFrame.id, updated.id)
+                          .then(() =>
+                            updateCard({
+                              ...updated,
+                              position: { ...updated.position },
+                            })
+                          )
+                          .catch(console.error);
+                        return;
+                      }
                       // Convert absolute drop position to relative for in-memory state
                       const parentAbs = updated.parent_id ? getAbsPos(updated.parent_id) : { x: 0, y: 0 };
                       const relative = {
@@ -1118,44 +1284,6 @@ export const CardContainer = (props: CardContainerProps) => {
               );
             }}
           </For>
-          <Show when={linkPreview()}>
-            {(preview) => {
-              const previewCard = () => cardMap().get(preview().cardId);
-              return (
-                <Show when={previewCard()}>
-                  {(card) => (
-                    <LinkedCardPreview
-                      style={{
-                        left: `${preview().position.x}px`,
-                        top: `${preview().position.y}px`,
-                      }}
-                    >
-                      <PreviewHeader>
-                        <strong>
-                          {extractFirstH1(card().contents || "") ||
-                            card().title ||
-                            `Card ${card().id}`}
-                        </strong>
-                        <PreviewActions>
-                          <Show when={props.canEdit()}>
-                            <button onClick={() => props.setEdittingCard(card())}>編集</button>
-                          </Show>
-                          <button onClick={() => openPage(card().id)}>開く</button>
-                          <button onClick={() => setLinkPreview(null)}>閉じる</button>
-                        </PreviewActions>
-                      </PreviewHeader>
-                      <PreviewBody
-                        class="markdown-body"
-                        innerHTML={
-                          DOMPurify.sanitize(marked(card().contents || "")) || ""
-                        }
-                      />
-                    </LinkedCardPreview>
-                  )}
-                </Show>
-              );
-            }}
-          </Show>
           <svg
             class={style({
               position: "absolute",
@@ -1196,6 +1324,48 @@ export const CardContainer = (props: CardContainerProps) => {
             </Show>
           </svg>
         </div>
+        <Show when={linkPreview()}>
+          {(preview) => {
+            const previewCard = () => cardMap().get(preview().cardId);
+            return (
+              <Show when={previewCard()}>
+                {(card) => (
+                  <LinkedCardPreview
+                    data-linked-card-preview
+                    style={{
+                      left: `${preview().position.x}px`,
+                      top: `${preview().position.y}px`,
+                    }}
+                  >
+                    <PreviewHeader>
+                      <strong>
+                        {extractFirstH1(card().contents || "") ||
+                          card().title ||
+                          `Card ${card().id}`}
+                        <PrivateMark visible={isPrivateCard(card())} />
+                      </strong>
+                      <PreviewActions>
+                        <Show when={props.canEdit()}>
+                          <button onClick={() => props.setEdittingCard(card())}>編集</button>
+                        </Show>
+                        <button onClick={() => openPage(card().id)}>開く</button>
+                        <button onClick={() => setLinkPreview(null)}>閉じる</button>
+                      </PreviewActions>
+                    </PreviewHeader>
+                    <PreviewBody
+                      class="markdown-body"
+                      classList={{ "private-title-lock": isPrivateCard(card()) }}
+                      onClick={(event) => handleLinkedMarkdownClick(card().id, event)}
+                      innerHTML={
+                        DOMPurify.sanitize(marked(card().contents || "")) || ""
+                      }
+                    />
+                  </LinkedCardPreview>
+                )}
+              </Show>
+            );
+          }}
+        </Show>
       </StyledCardContainer>
       <Show when={pageViewId() != null}>
         <PageView
@@ -1203,7 +1373,32 @@ export const CardContainer = (props: CardContainerProps) => {
           cards={props.cards}
           relations={props.cardRelations}
           onClose={() => closePage()}
-          onNavigate={(id) => openPage(id)}
+          onNavigate={(id) => {
+            setPageViewId(null);
+            setLinkPreview({
+              cardId: id,
+              position: getPreviewScreenPosition(null, {
+                x: window.innerWidth / 2,
+                y: window.innerHeight / 2,
+              }),
+            });
+            try {
+              window.history.pushState({ cardId: id }, "", `/card/${id}`);
+            } catch {}
+          }}
+          onCardLinkClick={(event) => {
+            const link = hrefFromCardLinkClick(event);
+            if (!link) return;
+            const sourceId = pageViewId();
+            if (sourceId == null) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setPageViewId(null);
+            openLinkedCardPreview(sourceId, link.href, {
+              x: event.clientX,
+              y: event.clientY,
+            }, link.anchorRect);
+          }}
         />
       </Show>
       {/* Sticky frame titles: pinned to the viewport edge while tracking the
@@ -1230,6 +1425,7 @@ export const CardContainer = (props: CardContainerProps) => {
             }}
           >
             {t.title}
+            <PrivateMark visible={t.visibility === "private"} />
           </div>
         )}
       </For>
@@ -1292,7 +1488,7 @@ const StyledCardContainer = styled("div", {
 
 const LinkedCardPreview = styled("div", {
   base: {
-    position: "absolute",
+    position: "fixed",
     zIndex: 1800,
     width: "320px",
     maxHeight: "360px",
@@ -1344,5 +1540,12 @@ const PreviewBody = styled("div", {
     overflow: "auto",
     fontSize: "13px",
     lineHeight: 1.55,
+    "&.private-title-lock h1::after": {
+      content: '"🔒"',
+      fontSize: "0.72em",
+      marginLeft: "0.28em",
+      opacity: 0.72,
+      verticalAlign: "0.08em",
+    },
   },
 });

@@ -4,6 +4,7 @@ import type { Dimmension } from "../schema/Point.js";
 import { useContextMenu } from "../hooks/useContextMenu.js";
 import type { MenuItem } from "../hooks/useContextMenu.js";
 import type { CardProps } from "./types.js";
+import { isPrivateCard, PrivateMark } from "./PrivateMark.jsx";
 import {
   computeConnectHandles,
   createCommonMenuItems,
@@ -74,6 +75,7 @@ export const FrameCard = (props: CardProps) => {
           "box-shadow": "none",
           "z-index": 400,
         }}
+        classList={{ "private-card": isPrivateCard(props.card()) }}
       >
         <StyledCardHeader ref={(el) => (headerRef = el)} class="card-header">
           <div
@@ -91,6 +93,7 @@ export const FrameCard = (props: CardProps) => {
             }}
           >
             {props.card().title || "(untitled)"}
+            <PrivateMark visible={isPrivateCard(props.card())} />
           </div>
         </StyledCardHeader>
         <Show when={!props.isMinimized()}>

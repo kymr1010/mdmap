@@ -1,13 +1,12 @@
 use axum::{
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
-        HeaderValue, Method,
+        Method,
     },
     Extension,
 };
-use std::env;
 use std::net::SocketAddr;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 // mod config;
@@ -31,14 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     auth::bootstrap_admin(&pool, &auth_state).await?;
 
     // CORS
-    let frontend_origin =
-        env::var("MEMOAPP_FRONTEND_ORIGIN").unwrap_or_else(|_| "http://localhost:5173".into());
-    let frontend_origin = HeaderValue::from_str(&frontend_origin)?;
     let cors = CorsLayer::new()
-        .allow_origin(frontend_origin)
+        .allow_origin(Any)
         .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([CONTENT_TYPE, AUTHORIZATION])
-        .allow_credentials(true);
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
     let trace = TraceLayer::new_for_http();
 

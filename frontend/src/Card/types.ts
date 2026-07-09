@@ -33,6 +33,7 @@ export interface CardProps {
   onCardLinkClick?: (
     sourceCardId: Card["id"],
     href: string,
-    screenPosition: Dimmension
+    screenPosition: Dimmension,
+    anchorRect?: DOMRect
   ) => void;
 }

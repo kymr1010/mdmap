@@ -16,6 +16,7 @@ import { extractFirstH1 } from "../utils/markdown.js";
 import { TagInput } from "../Tag/Tag.jsx";
 import type { Tag } from "../schema/Tag.js";
 import { getTags, createTag as apiCreateTag } from "../hooks/useTagAPI.js";
+import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
 
 type EditorPanelProps = {
   card: Accessor<CardProps | null>;
@@ -130,7 +131,10 @@ export const EditorPanel = (props: EditorPanelProps) => {
 
   return (
     <StyledPanel open={isOpen()}>
-      <h2>カードを編集: {props.card()?.title || "(untitled)"}</h2>
+      <h2>
+        カードを編集: {props.card()?.title || "(untitled)"}
+        <PrivateMark visible={props.card() ? isPrivateCard(props.card()!) : false} />
+      </h2>
       {/* Title input removed: title is derived from first H1 */}
       <label>
         コンテンツ (Markdown)

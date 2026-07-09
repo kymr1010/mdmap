@@ -5,6 +5,7 @@ import type { CardRelation } from "../schema/CardRelation.js";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { extractFirstH1 } from "../utils/markdown.js";
+import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
 
 type PageViewProps = {
   card: Accessor<Card | undefined>;
@@ -12,6 +13,7 @@ type PageViewProps = {
   relations: Accessor<CardRelation[]>;
   onClose: () => void;
   onNavigate?: (id: number) => void;
+  onCardLinkClick?: (event: MouseEvent) => void;
 };
 
 export const PageView = (props: PageViewProps) => {
@@ -27,7 +29,12 @@ export const PageView = (props: PageViewProps) => {
         <Header>
           <CloseBtn onClick={props.onClose} aria-label="Close">×</CloseBtn>
         </Header>
-        <Content class="markdown-body" innerHTML={DOMPurify.sanitize(marked(props.card()?.contents || ""))} />
+        <Content
+          class="markdown-body"
+          classList={{ "private-title-lock": props.card() ? isPrivateCard(props.card()!) : false }}
+          innerHTML={DOMPurify.sanitize(marked(props.card()?.contents || ""))}
+          onClick={(event) => props.onCardLinkClick?.(event)}
+        />
         <Lists>
           <Show when={parents().length > 0}>
             <Section>
@@ -36,8 +43,9 @@ export const PageView = (props: PageViewProps) => {
                 <For each={parents()}>
                   {(p) => (
                     <li>
-                      <a href={`/card/${p.id}/view`} onClick={(e) => { e.preventDefault(); props.onNavigate?.(p.id); }}>
+                      <a href={`/card/${p.id}`} onClick={(e) => { e.preventDefault(); props.onNavigate?.(p.id); }}>
                         {cardTitle(p)}
+                        <PrivateMark visible={isPrivateCard(p)} />
                       </a>
                     </li>
                   )}
@@ -52,8 +60,9 @@ export const PageView = (props: PageViewProps) => {
                 <For each={children()}>
                   {(ch) => (
                     <li>
-                      <a href={`/card/${ch.id}/view`} onClick={(e) => { e.preventDefault(); props.onNavigate?.(ch.id); }}>
+                      <a href={`/card/${ch.id}`} onClick={(e) => { e.preventDefault(); props.onNavigate?.(ch.id); }}>
                         {cardTitle(ch)}
+                        <PrivateMark visible={isPrivateCard(ch)} />
                       </a>
                     </li>
                   )}
@@ -116,6 +125,13 @@ const Content = styled("div", {
   base: {
     lineHeight: 1.7,
     fontSize: "16px",
+    "&.private-title-lock h1::after": {
+      content: '"🔒"',
+      fontSize: "0.72em",
+      marginLeft: "0.28em",
+      opacity: 0.72,
+      verticalAlign: "0.08em",
+    },
   },
 });
 const Lists = styled("div", { base: { marginTop: "24px" } });

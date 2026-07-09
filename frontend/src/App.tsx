@@ -217,6 +217,12 @@ function App() {
   );
 
   // NodeTree removed for simplicity; render from cards directly
+  const loadCards = async () => {
+    const rels = await getCardRelations();
+    const fetched = await getCards();
+    setCardRelations(rels);
+    setCards(normalizeCardsToRelative(fetched));
+  };
 
   onMount(async () => {
     const syncLoginControls = () => {
@@ -242,10 +248,7 @@ function App() {
         setCanEdit(false);
       });
 
-    const rels = await getCardRelations();
-    const fetched = await getCards();
-    setCardRelations(rels);
-    setCards(normalizeCardsToRelative(fetched));
+    await loadCards();
     console.log(cardRelations());
     // init();
   });
@@ -261,6 +264,7 @@ function App() {
       setPassword("");
       setApiToken("");
       setApiTokenError("");
+      await loadCards();
     } catch (e) {
       console.error(e);
       setAuthError("ログインできませんでした");
@@ -278,6 +282,7 @@ function App() {
       setEdittingCard(null);
       setApiToken("");
       setApiTokenError("");
+      await loadCards();
     } catch (e) {
       console.error(e);
     }

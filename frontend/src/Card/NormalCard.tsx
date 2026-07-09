@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { Card } from "../schema/Card.js";
 import { extractFirstH1 } from "../utils/markdown.js";
+import { isPrivateCard, PrivateMark } from "./PrivateMark.jsx";
 import { useContextMenu } from "../hooks/useContextMenu.js";
 import type { Dimmension } from "../schema/Point.js";
 import type { CardProps } from "./types.js";
@@ -107,7 +108,7 @@ export const NormalCard = (props: CardProps) => {
     props.onCardLinkClick?.(props.card().id, url.pathname, {
       x: event.clientX,
       y: event.clientY,
-    });
+    }, link.getBoundingClientRect());
   };
 
   return (
@@ -129,6 +130,7 @@ export const NormalCard = (props: CardProps) => {
           height: props.isMinimized() ? undefined : `${size().y}px`,
         }}
         macaronHover={isHovered() ? "hover" : undefined}
+        classList={{ "private-card": isPrivateCard(props.card()) }}
       >
         <StyledCardHeader ref={(el) => (headerRef = el)} class="card-header">
           <Show when={props.isMinimized()}>
@@ -141,6 +143,7 @@ export const NormalCard = (props: CardProps) => {
               }}
             >
               {props.card().title || "(untitled)"}
+              <PrivateMark visible={isPrivateCard(props.card())} />
             </div>
           </Show>
         </StyledCardHeader>
@@ -156,6 +159,7 @@ export const NormalCard = (props: CardProps) => {
                 fallback={
                   <div
                     class="markdown-body"
+                    classList={{ "private-title-lock": isPrivateCard(props.card()) }}
                     innerHTML={renderedContents()}
                     onClick={handleMarkdownClick}
                   />

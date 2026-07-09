@@ -1,4 +1,17 @@
 services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
   frontend:
     build:
       context: .
@@ -8,8 +21,8 @@ services:
         VITE_LOGIN_QUERY_KEY: ${VITE_LOGIN_QUERY_KEY}
         VITE_LOGIN_QUERY_VALUE: ${VITE_LOGIN_QUERY_VALUE}
     restart: unless-stopped
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       backend:
         condition: service_healthy
@@ -23,7 +36,7 @@ services:
       DATABASE_URL: mysql://${DB_USER}:${DB_PASS}@mariadb:3306/${DB_NAME}
       MEMOAPP_FRONTEND_ORIGIN: ${MEMOAPP_FRONTEND_ORIGIN}
       MEMOAPP_ADMIN_PASSWORD: ${MEMOAPP_ADMIN_PASSWORD}
-      MEMOAPP_COOKIE_SECURE: ${MEMOAPP_COOKIE_SECURE:-false}
+      MEMOAPP_COOKIE_SECURE: ${MEMOAPP_COOKIE_SECURE:-true}
     expose:
       - "8082"
     depends_on:
@@ -48,4 +61,6 @@ services:
       - mariadb_data:/var/lib/mysql
 
 volumes:
+  caddy_data:
+  caddy_config:
   mariadb_data:

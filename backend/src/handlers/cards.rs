@@ -214,6 +214,59 @@ pub async fn delete_card(
     Extension(pool): Extension<Pool<sqlx::MySql>>,
     Json(params): Json<Card>,
 ) -> impl IntoResponse {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+                ),
+            );
+        }
+    };
+
+    let delete_relations = sqlx::query(
+        r#"
+        DELETE FROM card_card
+        WHERE card_parent_id = ? OR card_child_id = ?
+    "#,
+    )
+    .bind(&params.id)
+    .bind(&params.id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = delete_relations {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+            ),
+        );
+    }
+
+    let delete_tags = sqlx::query(
+        r#"
+        DELETE FROM card_tag
+        WHERE card_id = ?
+    "#,
+    )
+    .bind(&params.id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = delete_tags {
+        let _ = tx.rollback().await;
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(
+                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+            ),
+        );
+    }
+
     let res = sqlx::query(
         r#"
         DELETE FROM cards 
@@ -221,20 +274,31 @@ pub async fn delete_card(
     "#,
     )
     .bind(&params.id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await;
 
     match res {
-        Ok(_) => (
-            StatusCode::ACCEPTED,
-            Json(json!({"code": StatusCode::ACCEPTED.to_string(), "message":"Success"})),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(
-                json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+        Ok(_) => match tx.commit().await {
+            Ok(_) => (
+                StatusCode::ACCEPTED,
+                Json(json!({"code": StatusCode::ACCEPTED.to_string(), "message":"Success"})),
             ),
-        ),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+                ),
+            ),
+        },
+        Err(e) => {
+            let _ = tx.rollback().await;
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(
+                    json!({"code": StatusCode::INTERNAL_SERVER_ERROR.to_string(), "message": e.to_string()}),
+                ),
+            )
+        }
     }
 }
 

@@ -161,7 +161,7 @@ impl AuthState {
         }
     }
 
-    async fn api_key_user(&self, pool: &Pool<MySql>, headers: &HeaderMap) -> Option<SessionUser> {
+    pub async fn api_key_user(&self, pool: &Pool<MySql>, headers: &HeaderMap) -> Option<SessionUser> {
         let token = bearer_token_from_headers(headers)?;
         let users = sqlx::query_as::<_, ApiKeyUserRow>(
             "SELECT id, role, api_key_hash FROM users WHERE is_active = TRUE AND api_key_hash IS NOT NULL",
@@ -388,6 +388,18 @@ pub async fn require_write_auth(
 
     if matches!(req.method(), &Method::GET | &Method::HEAD | &Method::OPTIONS) {
         return next.run(req).await;
+    }
+
+    if req.uri().path() == "/cards/flush_json" {
+        if state.api_key_user(&pool, req.headers()).await.is_some() {
+            return next.run(req).await;
+        }
+
+        return ApiResponse::<()>::new_err(
+            StatusCode::UNAUTHORIZED,
+            "api token required",
+        )
+        .into_response();
     }
 
     if state.is_authenticated(req.headers()) {

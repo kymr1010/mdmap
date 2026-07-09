@@ -165,5 +165,12 @@ export const StyledCardContent = styled("div", {
     "& .markdown-body h1": {
       cursor: "grab",
     },
+    "& .markdown-body.private-title-lock h1::after": {
+      content: '"🔒"',
+      fontSize: "0.72em",
+      marginLeft: "0.28em",
+      opacity: 0.72,
+      verticalAlign: "0.08em",
+    },
   },
 });

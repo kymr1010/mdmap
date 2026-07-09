@@ -1,6 +1,7 @@
 import { styled } from "@macaron-css/solid";
 import { Accessor, For, Show, createMemo, createSignal } from "solid-js";
 import { Card } from "../schema/Card.js";
+import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
 
 type SideCardTreeProps = {
   cards: Accessor<Card[]>;
@@ -172,7 +173,10 @@ const NodeRow = (props: {
           <Show when={isFolder()} fallback={<span>📄</span>}>
             <span>📁</span>
           </Show>
-          <span style={{ marginLeft: "0.5em" }}>{props.item.title || "(untitled)"}</span>
+          <span style={{ marginLeft: "0.5em" }}>
+            {props.item.title || "(untitled)"}
+            <PrivateMark visible={isPrivateCard(props.item)} />
+          </span>
         </Label>
       </Row>
       <Show when={open() && isFolder()}>
