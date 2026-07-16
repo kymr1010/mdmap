@@ -69,6 +69,7 @@ export const CardContainer = (props: CardContainerProps) => {
   const [scale, setScale] = createSignal<number>(1);
   const [zoomLevel, setZoomLevel] = createSignal<number>(0);
   const [isPinching, setIsPinching] = createSignal(false);
+  const [showOkCountColor, setShowOkCountColor] = createSignal(false);
 
   const ZOOM = {
     MAX: 5,
@@ -1009,6 +1010,8 @@ export const CardContainer = (props: CardContainerProps) => {
   // edge but keeps tracking the frame title's real X (when clipped at the top)
   // or Y (when clipped at the left), so it stays aligned with the frame.
   const STICKY_MARGIN = 8;
+  const STICKY_OPEN_BUTTON_CLEARANCE_X = 64;
+  const STICKY_OPEN_BUTTON_CLEARANCE_Y = 42;
   const stickyFrameTitles = createMemo(() => {
     const pos = position();
     const s = scale();
@@ -1042,7 +1045,13 @@ export const CardContainer = (props: CardContainerProps) => {
         visibility: r.visibility,
         // Clamp to the viewport: clipped-at-top -> pin to top (top=margin) but
         // keep the real X; clipped-at-left -> pin to left but keep the real Y.
-        left: clamp(r.screenX, STICKY_MARGIN, vw - STICKY_MARGIN),
+        left: clamp(
+          r.screenX,
+          r.screenY < STICKY_OPEN_BUTTON_CLEARANCE_Y
+            ? STICKY_OPEN_BUTTON_CLEARANCE_X
+            : STICKY_MARGIN,
+          vw - STICKY_MARGIN,
+        ),
         top: clamp(r.screenY, STICKY_MARGIN, vh - STICKY_MARGIN),
       }));
   });
@@ -1109,6 +1118,7 @@ export const CardContainer = (props: CardContainerProps) => {
                     onOpenPage={openPage}
                     onCreateCard={() => addCard(cardAcc())}
                     onCardLinkClick={openLinkedCardPreview}
+                    showOkCountColor={showOkCountColor}
                     canEdit={props.canEdit}
                     setCard={(newCard) => {
                       const patched = withStoredPosFromAbs(
@@ -1394,6 +1404,27 @@ export const CardContainer = (props: CardContainerProps) => {
         <div>
           {position().x}, {position().y}
         </div>
+        <label
+          title="ok_count に応じた赤色を通常カードに表示"
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            "align-self": "flex-end",
+            "user-select": "none",
+            "-webkit-user-select": "none",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showOkCountColor()}
+            onInput={(event) =>
+              setShowOkCountColor(event.currentTarget.checked)
+            }
+            style={{ margin: 0 }}
+          />
+          色
+        </label>
         <input
           type="range"
           min={ZOOM.MIN}

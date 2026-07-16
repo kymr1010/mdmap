@@ -1,0 +1,356 @@
+openapi: 3.1.0
+info:
+  title: MemoApp Cards API for ChatGPT Actions
+  version: 1.0.0
+  description: |
+    Actions schema for reading flash-card compatible cards, posting review results,
+    creating cards, and optionally linking created cards to a parent.
+servers:
+  - url: https://mnyume.com/api
+security:
+  - bearerAuth: []
+paths:
+  /cards/flush_json:
+    get:
+      operationId: getFlashCards
+      summary: Get cards for review by tag and/or parent card
+      description: |
+        Returns cards in flash-card compatible JSON format.
+        Use tag, parent_id, or both. When both are provided, cards must match both filters.
+      parameters:
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Card tag name to filter by.
+        - name: parent_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Parent card id. Returns direct child cards of this parent.
+      responses:
+        "200":
+          description: Flash-card compatible card list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FlashCard"
+        "400":
+          description: tag or parent_id is required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: postFlashCardResult
+      summary: Post review result and optionally update card contents
+      description: |
+        Posts a review result for a card returned by getFlashCards.
+        If contents is provided, the card body is replaced with the provided Markdown.
+        Use the same tag and/or parent_id filter as the GET request so the target card is scoped.
+      parameters:
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Card tag name used to scope the update.
+        - name: parent_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Parent card id used to scope the update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashCardResult"
+      responses:
+        "200":
+          description: Updated card in flash-card compatible format.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashCard"
+        "400":
+          description: Invalid request body or missing query scope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: API token required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Card not found for the provided query.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /card:
+    post:
+      operationId: createCard
+      summary: Create a card
+      description: |
+        Creates a card. For root cards, position is an absolute canvas coordinate.
+        For child cards, position should be relative to the parent card, but this endpoint
+        does not create the parent-child relation by itself. Call connectCards after this
+        operation when a parent-child relation is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardParams"
+      responses:
+        "200":
+          description: Created card wrapped in the app API response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardApiResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /cards_connect:
+    post:
+      operationId: connectCards
+      summary: Connect a parent card to a child card
+      description: |
+        Creates a parent-child relation. For frame/containment-style parent-child
+        relations with no visible connector line, set connector to the JSON string "null".
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardConnectParams"
+      responses:
+        "201":
+          description: Created card relation wrapped in the app API response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardRelationApiResponse"
+        "400":
+          description: Invalid relation, such as a cycle.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API token
+  schemas:
+    FlashCard:
+      type: object
+      required:
+        - id
+        - title
+        - contents
+        - date
+        - ok_count
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+        contents:
+          type: string
+          description: Markdown card contents.
+        date:
+          type: string
+          format: date-time
+          description: Card updated_at timestamp.
+        ok_count:
+          type: integer
+          description: Number of successful review results.
+    FlashCardResult:
+      type: object
+      required:
+        - id
+        - is_OK
+      properties:
+        id:
+          type: integer
+          format: int64
+        is_OK:
+          type: boolean
+          description: Whether the user's answer was acceptable.
+        date:
+          type: string
+          format: date-time
+          description: Review timestamp.
+        contents:
+          type: string
+          description: Optional replacement Markdown contents for the card.
+        title:
+          type: string
+          description: Optional replacement title.
+    Point:
+      type: object
+      required:
+        - x
+        - y
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+    CardParams:
+      type: object
+      required:
+        - id
+        - position
+        - size
+        - title
+        - contents
+        - parent_id
+        - tag_ids
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: Use 0 when creating a new card.
+        position:
+          $ref: "#/components/schemas/Point"
+        size:
+          $ref: "#/components/schemas/Point"
+        title:
+          type: string
+        contents:
+          type: string
+          description: Markdown card contents. Prefer starting with an H1 heading.
+        parent_id:
+          type:
+            - integer
+            - "null"
+          format: int64
+          description: Intended parent id. The relation still must be created with connectCards.
+        tag_ids:
+          type: array
+          items:
+            type: integer
+            format: int64
+        visibility:
+          type: string
+          enum:
+            - public
+            - private
+          default: public
+        card_type:
+          type: string
+          enum:
+            - normal
+            - frame
+          default: normal
+    Card:
+      allOf:
+        - $ref: "#/components/schemas/CardParams"
+        - type: object
+          required:
+            - created_at
+            - updated_at
+          properties:
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    CardConnectParams:
+      type: object
+      required:
+        - card_parent_id
+        - card_child_id
+        - connector
+      properties:
+        card_parent_id:
+          type: integer
+          format: int64
+        card_child_id:
+          type: integer
+          format: int64
+        connector:
+          type: string
+          description: JSON string for connector geometry, or "null" for no visible connector.
+    CardRelation:
+      type: object
+      required:
+        - card_parent_id
+        - card_child_id
+        - connector
+        - created_at
+        - updated_at
+      properties:
+        card_parent_id:
+          type: integer
+          format: int64
+        card_child_id:
+          type: integer
+          format: int64
+        connector:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CardApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/Card"
+    CardRelationApiResponse:
+      type: object
+      required:
+        - code
+        - message
+        - data
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/CardRelation"
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string

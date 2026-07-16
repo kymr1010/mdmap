@@ -17,6 +17,7 @@ export interface Card {
   visibility?: CardVisibility;
   /** rendering type; "frame" shows a large region and auto-parents cards created inside it */
   card_type?: CardType;
+  ok_count?: number;
   created_at: string;
   updated_at: string;
 }

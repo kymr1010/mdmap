@@ -25,6 +25,7 @@ pub struct Card {
     pub visibility: String,
     #[serde(default = "default_card_type")]
     pub card_type: String,
+    pub ok_count: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -57,6 +58,7 @@ pub struct CardRow {
     pub tag_ids: serde_json::Value,
     pub visibility: String,
     pub card_type: String,
+    pub ok_count: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -80,6 +82,7 @@ impl From<CardRow> for Card {
             tag_ids,
             visibility: r.visibility,
             card_type: r.card_type,
+            ok_count: r.ok_count,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

@@ -99,6 +99,7 @@ export const CardNodeElm: Component<
         }}
         setEdittingCard={props.cardContainerUtilProps.setEdittingCard}
         scaleFactor={props.cardContainerUtilProps.scale}
+        showOkCountColor={() => false}
         onHover={(card) => props.cardContainerUtilProps.setHoveredCard(card)}
         onLeave={() => {
           props.cardContainerUtilProps.setHoveredCard(null);

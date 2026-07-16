@@ -4,6 +4,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { Card } from "../schema/Card.js";
 import { extractFirstH1 } from "../utils/markdown.js";
+import { OkCountMark, okCountBackground, okCountValue } from "./OkCountMark.jsx";
 import { isPrivateCard, PrivateMark } from "./PrivateMark.jsx";
 import { useContextMenu } from "../hooks/useContextMenu.js";
 import type { Dimmension } from "../schema/Point.js";
@@ -128,10 +129,14 @@ export const NormalCard = (props: CardProps) => {
           position: "absolute",
           width: `${size().x}px`,
           height: props.isMinimized() ? undefined : `${size().y}px`,
+          "background-color": props.showOkCountColor()
+            ? okCountBackground(props.card())
+            : "white",
         }}
         macaronHover={isHovered() ? "hover" : undefined}
         classList={{ "private-card": isPrivateCard(props.card()) }}
       >
+        <OkCountMark count={okCountValue(props.card())} />
         <StyledCardHeader ref={(el) => (headerRef = el)} class="card-header">
           <Show when={props.isMinimized()}>
             <div

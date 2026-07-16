@@ -12,6 +12,7 @@ export interface CardProps {
   setCard: (card: Card) => void;
   scaleFactor: Accessor<number>;
   canEdit: Accessor<boolean>;
+  showOkCountColor: Accessor<boolean>;
   setEdittingCard: Setter<Card | null>;
   isMinimized: Accessor<boolean>;
   onToggleMinimize: (id: number) => void;

@@ -4,6 +4,7 @@ import type { Dimmension } from "../schema/Point.js";
 import { useContextMenu } from "../hooks/useContextMenu.js";
 import type { MenuItem } from "../hooks/useContextMenu.js";
 import type { CardProps } from "./types.js";
+import { OkCountMark, okCountValue } from "./OkCountMark.jsx";
 import { isPrivateCard, PrivateMark } from "./PrivateMark.jsx";
 import {
   computeConnectHandles,
@@ -77,6 +78,7 @@ export const FrameCard = (props: CardProps) => {
         }}
         classList={{ "private-card": isPrivateCard(props.card()) }}
       >
+        <OkCountMark count={okCountValue(props.card())} />
         <StyledCardHeader ref={(el) => (headerRef = el)} class="card-header">
           <div
             class="frame-title"
