@@ -1,9 +1,8 @@
 import { createEffect, createSignal, Show } from "solid-js";
 import { Portal } from "solid-js/web";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import type { Card } from "../schema/Card.js";
 import { extractFirstH1 } from "../utils/markdown.js";
+import { MarkdownBody } from "../Markdown/MarkdownBody.jsx";
 import { OkCountMark, okCountBackground, okCountValue } from "./OkCountMark.jsx";
 import { isPrivateCard, PrivateMark } from "./PrivateMark.jsx";
 import { useContextMenu } from "../hooks/useContextMenu.js";
@@ -91,9 +90,6 @@ export const NormalCard = (props: CardProps) => {
     if (commit) persistContents(nextDraft);
   };
 
-  const renderedContents = () =>
-    DOMPurify.sanitize(marked(contents() || "") || "");
-
   const handleMarkdownClick = (event: MouseEvent) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -162,10 +158,10 @@ export const NormalCard = (props: CardProps) => {
               <Show
                 when={inlineEditing()}
                 fallback={
-                  <div
+                  <MarkdownBody
                     class="markdown-body"
                     classList={{ "private-title-lock": isPrivateCard(props.card()) }}
-                    innerHTML={renderedContents()}
+                    markdown={contents}
                     onClick={handleMarkdownClick}
                   />
                 }

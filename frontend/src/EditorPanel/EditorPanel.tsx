@@ -60,6 +60,21 @@ globalStyle(CM_MARKDOWN_TOKENS, {
   background: "none !important",
 });
 
+globalStyle(".EasyMDEContainer .CodeMirror .cm-spell-error", {
+  color: "inherit !important",
+  background: "none !important",
+  textDecoration: "none !important",
+});
+
+globalStyle(
+  ".EasyMDEContainer .CodeMirror .cm-error, .EasyMDEContainer .CodeMirror .cm-invalidchar",
+  {
+    color: "inherit !important",
+    background: "none !important",
+    textDecoration: "none !important",
+  },
+);
+
 export const EditorPanel = (props: EditorPanelProps) => {
   let ref = undefined as HTMLTextAreaElement | undefined;
   let easyMDE: EasyMDE;
@@ -108,6 +123,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
       element: ref!,
       // Hide preview-related UI while editing
       hideIcons: ["guide", "fullscreen", "preview", "side-by-side"],
+      spellChecker: false,
       // Disable preview toggle shortcuts as well
       shortcuts: {
         toggleSideBySide: null,
@@ -140,6 +156,7 @@ export const EditorPanel = (props: EditorPanelProps) => {
         コンテンツ (Markdown)
         <textarea
           ref={ref}
+          spellcheck={false}
           style={{
             width: "100%",
             height: "40vh",

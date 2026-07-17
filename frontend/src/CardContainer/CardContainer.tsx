@@ -16,8 +16,6 @@ import { Card, Dir } from "../schema/Card.js";
 import { Dimmension } from "../schema/Point.js";
 import { useDrag } from "../hooks/useDrag.js";
 import { style } from "@macaron-css/core";
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import { useContextMenu } from "../hooks/useContextMenu.jsx";
 import { createCard, getCards, updateCard } from "../hooks/useCardAPI.js";
 import { deleteCard as deleteCardAPI } from "../hooks/useCardAPI.js";
@@ -44,6 +42,7 @@ import { PageView } from "../PageView/PageView.jsx";
 import { inputManager } from "../input/manager.js";
 import { createLongPressContextMenu } from "../input/gestures.js";
 import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
+import { MarkdownBody } from "../Markdown/MarkdownBody.jsx";
 
 export interface CardContainerProps {
   position: Dimmension;
@@ -1307,9 +1306,7 @@ export const CardContainer = (props: CardContainerProps) => {
                       class="markdown-body"
                       classList={{ "private-title-lock": isPrivateCard(card()) }}
                       onClick={(event) => handleLinkedMarkdownClick(card().id, event)}
-                      innerHTML={
-                        DOMPurify.sanitize(marked(card().contents || "")) || ""
-                      }
+                      markdown={() => card().contents || ""}
                     />
                   </LinkedCardPreview>
                 )}
@@ -1506,7 +1503,7 @@ const PreviewActions = styled("div", {
   },
 });
 
-const PreviewBody = styled("div", {
+const PreviewBody = styled(MarkdownBody, {
   base: {
     maxHeight: "300px",
     overflow: "auto",

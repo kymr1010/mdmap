@@ -13,7 +13,9 @@
     "@yaireo/tagify": "^4.35.1",
     "dompurify": "^3.4.11",
     "easymde": "^2.20.0",
+    "highlight.js": "^11.11.1",
     "marked": "^15.0.11",
+    "mermaid": "^11.12.1",
     "solid-js": "^1.9.14"
   },
   "devDependencies": {

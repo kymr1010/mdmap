@@ -2,10 +2,9 @@ import { styled } from "@macaron-css/solid";
 import { Accessor, For, Show, createMemo } from "solid-js";
 import type { Card } from "../schema/Card.js";
 import type { CardRelation } from "../schema/CardRelation.js";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
 import { extractFirstH1 } from "../utils/markdown.js";
 import { isPrivateCard, PrivateMark } from "../Card/PrivateMark.jsx";
+import { MarkdownBody } from "../Markdown/MarkdownBody.jsx";
 
 type PageViewProps = {
   card: Accessor<Card | undefined>;
@@ -32,7 +31,7 @@ export const PageView = (props: PageViewProps) => {
         <Content
           class="markdown-body"
           classList={{ "private-title-lock": props.card() ? isPrivateCard(props.card()!) : false }}
-          innerHTML={DOMPurify.sanitize(marked(props.card()?.contents || ""))}
+          markdown={() => props.card()?.contents || ""}
           onClick={(event) => props.onCardLinkClick?.(event)}
         />
         <Lists>
@@ -121,7 +120,7 @@ const CloseBtn = styled("button", {
   },
 });
 
-const Content = styled("div", {
+const Content = styled(MarkdownBody, {
   base: {
     lineHeight: 1.7,
     fontSize: "16px",
