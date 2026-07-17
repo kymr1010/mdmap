@@ -9,3 +9,11 @@ import App from "./App.js";
 const root = document.getElementById("root");
 
 render(() => <App />, root);
+
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.error("failed to register service worker", error);
+    });
+  });
+}
