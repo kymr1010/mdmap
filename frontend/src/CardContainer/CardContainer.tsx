@@ -103,6 +103,13 @@ export const CardContainer = (props: CardContainerProps) => {
     cardId: Card["id"];
     position: Dimmension;
   } | null>(null);
+  let linkPreviewDrag:
+    | {
+        pointerId: number;
+        startClient: Dimmension;
+        startPosition: Dimmension;
+      }
+    | null = null;
   const touchPointers = new Map<number, Dimmension>();
   const longPress = createLongPressContextMenu();
   let pinchStart:
@@ -225,6 +232,12 @@ export const CardContainer = (props: CardContainerProps) => {
     onCleanup(() => window.removeEventListener("pointerdown", closePreview, true));
   });
 
+  onCleanup(() => {
+    window.removeEventListener("pointermove", moveLinkPreview);
+    window.removeEventListener("pointerup", stopLinkPreviewDrag);
+    window.removeEventListener("pointercancel", stopLinkPreviewDrag);
+  });
+
   const { currentLine, startConnect } = useConnector({
     mousePosition: fixedMousePosition,
     onUpCallback: async (fromID: Card["id"]) => {
@@ -327,13 +340,21 @@ export const CardContainer = (props: CardContainerProps) => {
   const replaceFirstNewCardLink = (contents: string, cardId: Card["id"]) =>
     contents.replace("/card/new", `/card/${cardId}`);
 
+  const clampPreviewPosition = (p: Dimmension): Dimmension => {
+    const previewSize = { x: 320, y: 360 };
+    const margin = 12;
+    const viewport = { x: window.innerWidth, y: window.innerHeight };
+    return {
+      x: clamp(p.x, margin, viewport.x - previewSize.x - margin),
+      y: clamp(p.y, margin, viewport.y - previewSize.y - margin),
+    };
+  };
+
   const getPreviewScreenPosition = (
     sourceCardId: Card["id"] | null,
     screenPosition: Dimmension,
     anchorRect?: DOMRect
   ): Dimmension => {
-    const clampValue = (value: number, min: number, max: number) =>
-      Math.max(min, Math.min(max, value));
     const pointDistance = (a: Dimmension, b: Dimmension) =>
       Math.hypot(a.x - b.x, a.y - b.y);
     const previewSize = { x: 320, y: 360 };
@@ -362,10 +383,6 @@ export const CardContainer = (props: CardContainerProps) => {
             bottom: screenPosition.y,
           };
 
-    const clampPoint = (p: Dimmension): Dimmension => ({
-      x: clampValue(p.x, margin, viewport.x - previewSize.x - margin),
-      y: clampValue(p.y, margin, viewport.y - previewSize.y - margin),
-    });
     const overlaps = (p: Dimmension) =>
       p.x < avoid.right &&
       p.x + previewSize.x > avoid.left &&
@@ -376,13 +393,49 @@ export const CardContainer = (props: CardContainerProps) => {
       { x: avoid.left - previewSize.x - margin, y: screenPosition.y - 28 },
       { x: screenPosition.x - previewSize.x / 2, y: avoid.bottom + margin },
       { x: screenPosition.x - previewSize.x / 2, y: avoid.top - previewSize.y - margin },
-    ].map(clampPoint);
+    ].map(clampPreviewPosition);
 
     candidates.sort(
       (a, b) =>
         pointDistance(a, screenPosition) - pointDistance(b, screenPosition)
     );
     return candidates.find((p) => !overlaps(p)) ?? candidates[0];
+  };
+
+  function moveLinkPreview(event: PointerEvent) {
+    if (!linkPreviewDrag || event.pointerId !== linkPreviewDrag.pointerId) return;
+    event.preventDefault();
+    const next = clampPreviewPosition({
+      x: linkPreviewDrag.startPosition.x + event.clientX - linkPreviewDrag.startClient.x,
+      y: linkPreviewDrag.startPosition.y + event.clientY - linkPreviewDrag.startClient.y,
+    });
+    setLinkPreview((preview) => (preview ? { ...preview, position: next } : preview));
+  }
+
+  function stopLinkPreviewDrag(event: PointerEvent) {
+    if (!linkPreviewDrag || event.pointerId !== linkPreviewDrag.pointerId) return;
+    window.removeEventListener("pointermove", moveLinkPreview);
+    window.removeEventListener("pointerup", stopLinkPreviewDrag);
+    window.removeEventListener("pointercancel", stopLinkPreviewDrag);
+    linkPreviewDrag = null;
+  }
+
+  const startLinkPreviewDrag = (event: PointerEvent) => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest("button,a")) return;
+    const preview = linkPreview();
+    if (!preview) return;
+    event.preventDefault();
+    event.stopPropagation();
+    linkPreviewDrag = {
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      startPosition: preview.position,
+    };
+    window.addEventListener("pointermove", moveLinkPreview);
+    window.addEventListener("pointerup", stopLinkPreviewDrag);
+    window.addEventListener("pointercancel", stopLinkPreviewDrag);
   };
 
   const hrefFromCardLinkClick = (event: MouseEvent): {
@@ -1287,7 +1340,7 @@ export const CardContainer = (props: CardContainerProps) => {
                       top: `${preview().position.y}px`,
                     }}
                   >
-                    <PreviewHeader>
+                    <PreviewHeader onPointerDown={startLinkPreviewDrag}>
                       <strong>
                         {extractFirstH1(card().contents || "") ||
                           card().title ||
@@ -1322,26 +1375,16 @@ export const CardContainer = (props: CardContainerProps) => {
           relations={props.cardRelations}
           onClose={() => closePage()}
           onNavigate={(id) => {
-            setPageViewId(null);
-            setLinkPreview({
-              cardId: id,
-              position: getPreviewScreenPosition(null, {
-                x: window.innerWidth / 2,
-                y: window.innerHeight / 2,
-              }),
-            });
-            try {
-              window.history.pushState({ cardId: id }, "", `/card/${id}`);
-            } catch {}
+            setLinkPreview(null);
+            setPageViewId(id);
+            pushUrlForCard(id);
           }}
-          onCardLinkClick={(event) => {
+          onCardLinkHover={(event) => {
             const link = hrefFromCardLinkClick(event);
             if (!link) return;
+            if (link.href === "/card/new") return;
             const sourceId = pageViewId();
             if (sourceId == null) return;
-            event.preventDefault();
-            event.stopPropagation();
-            setPageViewId(null);
             openLinkedCardPreview(sourceId, link.href, {
               x: event.clientX,
               y: event.clientY,
@@ -1458,7 +1501,7 @@ const StyledCardContainer = styled("div", {
 const LinkedCardPreview = styled("div", {
   base: {
     position: "fixed",
-    zIndex: 1800,
+    zIndex: 7000,
     width: "320px",
     maxHeight: "360px",
     overflow: "hidden",
@@ -1478,6 +1521,9 @@ const PreviewHeader = styled("div", {
     justifyContent: "space-between",
     gap: "8px",
     marginBottom: "8px",
+    cursor: "move",
+    userSelect: "none",
+    WebkitUserSelect: "none",
     "& strong": {
       minWidth: 0,
       overflow: "hidden",

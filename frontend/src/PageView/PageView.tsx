@@ -13,6 +13,7 @@ type PageViewProps = {
   onClose: () => void;
   onNavigate?: (id: number) => void;
   onCardLinkClick?: (event: MouseEvent) => void;
+  onCardLinkHover?: (event: MouseEvent) => void;
 };
 
 export const PageView = (props: PageViewProps) => {
@@ -33,6 +34,7 @@ export const PageView = (props: PageViewProps) => {
           classList={{ "private-title-lock": props.card() ? isPrivateCard(props.card()!) : false }}
           markdown={() => props.card()?.contents || ""}
           onClick={(event) => props.onCardLinkClick?.(event)}
+          onMouseOver={(event) => props.onCardLinkHover?.(event)}
         />
         <Lists>
           <Show when={parents().length > 0}>

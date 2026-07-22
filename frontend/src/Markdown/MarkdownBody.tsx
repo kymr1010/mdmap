@@ -100,6 +100,7 @@ type MarkdownBodyProps = {
   class?: string;
   classList?: Record<string, boolean>;
   onClick?: (event: MouseEvent) => void;
+  onMouseOver?: (event: MouseEvent) => void;
 };
 
 export const MarkdownBody = (props: MarkdownBodyProps) => {
@@ -110,6 +111,10 @@ export const MarkdownBody = (props: MarkdownBodyProps) => {
     html();
     queueMicrotask(() => {
       if (!root) return;
+      root.querySelectorAll("a").forEach((link) => {
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+      });
       const nodes = Array.from(root.querySelectorAll(".mermaid"));
       if (nodes.length === 0) return;
       mermaid.run({ nodes }).catch((error) => {
@@ -125,6 +130,7 @@ export const MarkdownBody = (props: MarkdownBodyProps) => {
       classList={props.classList}
       innerHTML={html()}
       onClick={props.onClick}
+      onMouseOver={props.onMouseOver}
     />
   );
 };
